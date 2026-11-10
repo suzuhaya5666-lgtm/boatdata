@@ -141,7 +141,7 @@ def fit(X, N, P, Y):
     return W_all, losses
 
 
-def standardize(F):
+def standardize(F):  # noqa: E302
     """レース内の平均との差を、全体のばらつきで割る。欠けている値はレース平均(=0)。"""
     Z = F[:, 1:, :].copy()
     mean = np.nanmean(Z, axis=1, keepdims=True)
@@ -153,38 +153,82 @@ def standardize(F):
     return np.concatenate([np.zeros((len(F), 1, Z.shape[2])), Z], axis=1), sd
 
 
-def fit_logit(X, N, P, Y, F, W):
+def base_lq(X, N, P, W):
     E = (X + M * P[:, :, None, :]) / (N[..., None] + M)
     q = np.einsum("rksj,jks->rkj", E, W)
     q[:, 0, :] = 0
     q = np.clip(q, 1e-9, None)
     q[:, 0, :] = 0
-    LQ = np.log(q / q.sum(1, keepdims=True) + 1e-12)
-    Z, sd = standardize(F)
+    return np.log(q / q.sum(1, keepdims=True) + 1e-12)
+
+
+def fit_logit(LQ, Z, Y, feats, use_cbias, rows=None):
+    """選んだ材料(feats)とコース補正の有無で、着ごとの係数を決める。"""
+    if rows is not None:
+        LQ, Z, Y = LQ[rows], Z[rows], Y[rows]
     idx = np.arange(len(Y))
-    coefs, cbias, losses = [], [], []
+    nf = len(feats)
+    Zs = Z[:, :, feats]
+    coefs, cbias = [], []
     for j in range(3):
         excl = np.zeros((len(Y), 7))
         excl[:, 0] = 1
         for jj in range(j):
             excl[idx, Y[:, jj]] = 1
 
-        nf = len(FEATURES)
-
         def loss(t):
-            # コースの補正(全場共通): コース別成績だけでは内外の差が弱めに出るのを直す
-            cb = np.concatenate([[0], t[1 + nf:]])
-            s = t[0] * LQ[:, :, j] + Z @ t[1:1 + nf] + cb[None, :]
+            s = t[0] * LQ[:, :, j] + (Zs @ t[1:1 + nf] if nf else 0)
+            if use_cbias:  # コースの補正(全場共通): 内外の差が弱めに出るのを直す
+                s = s + np.concatenate([[0], t[1 + nf:]])[None, :]
             s = np.where(excl == 1, -1e9, s)
             s = s - s.max(1, keepdims=True)
-            return -(s[idx, Y[:, j]] - np.log(np.exp(s).sum(1))).mean() + 0.001 * (t[1 + nf:] ** 2).sum()
-        x0 = np.zeros(1 + nf + 6)
+            reg = 0.001 * (t[1 + nf:] ** 2).sum() if use_cbias else 0
+            return -(s[idx, Y[:, j]] - np.log(np.exp(s).sum(1))).mean() + reg
+        x0 = np.zeros(1 + nf + (6 if use_cbias else 0))
         x0[0] = 1
-        r = minimize(loss, x0, method="L-BFGS-B")
-        coefs.append(np.round(r.x[:1 + nf], 4).tolist())
-        cbias.append([0] + np.round(r.x[1 + nf:], 4).tolist())
-        losses.append(round(float(r.fun), 4))
-    return coefs, cbias, np.round(sd, 4).tolist(), losses
+        t = minimize(loss, x0, method="L-BFGS-B").x
+        full = [0.0] * len(FEATURES)
+        for i, f in enumerate(feats):
+            full[f] = round(float(t[1 + i]), 4)
+        coefs.append([round(float(t[0]), 4)] + full)
+        cbias.append([0] + (np.round(t[1 + nf:], 4).tolist() if use_cbias else [0] * 6))
+    return coefs, cbias
+
+
+PERMS = np.array([(a, b, c) for a in range(1, 7) for b in range(1, 7) for c in range(1, 7)
+                  if a != b and b != c and a != c])
+
+
+def evaluate(LQ, Z, Y, coefs, cbias, rows):
+    """検証用: 指定したレースで、3連単上位10点・2連単上位3点・単勝の的中率。"""
+    LQ, Z, Y = LQ[rows], Z[rows], Y[rows]
+    n = len(Y)
+    ex = []
+    for j in range(3):
+        c = np.array(coefs[j])
+        s = c[0] * LQ[:, :, j] + Z @ c[1:] + np.array(cbias[j])[None, :]
+        s[:, 0] = -1e9
+        ex.append(np.exp(s - s.max(1, keepdims=True)))
+    s1, s2, s3 = ex
+    a, b, cc = PERMS[:, 0], PERMS[:, 1], PERMS[:, 2]
+    p = (s1[:, a] / s1.sum(1, keepdims=True)) * (s2[:, b] / (s2.sum(1, keepdims=True) - s2[:, a])) * \
+        (s3[:, cc] / (s3.sum(1, keepdims=True) - s3[:, a] - s3[:, b]))
+    p = p / p.sum(1, keepdims=True)
+    ai = np.array([np.where((PERMS == y).all(1))[0][0] for y in Y])
+    pa = p[np.arange(n), ai]
+    tri10 = float(np.mean((p > pa[:, None]).sum(1) < 10))
+    keys = {}
+    for i, (x, y_, _) in enumerate(PERMS):
+        keys.setdefault((x, y_), []).append(i)
+    kl = list(keys)
+    em = np.stack([p[:, keys[k]].sum(1) for k in kl], 1)
+    act = np.array([kl.index((y[0], y[1])) for y in Y])
+    ex3 = float(np.mean((em > em[np.arange(n), act][:, None]).sum(1) < 3))
+    win = np.zeros((n, 7))
+    for i, (x, _, _) in enumerate(PERMS):
+        win[:, x] += p[:, i]
+    tan = float(np.mean(win.argmax(1) == Y[:, 0]))
+    return {"tri10": round(tri10 * 100, 1), "ex3": round(ex3 * 100, 1), "tan": round(tan * 100, 1)}
 
 
 def main():
@@ -197,16 +241,33 @@ def main():
                 return
     X, N, P, Y, F, first, last = build()
     W, losses = fit(X, N, P, Y)
-    coefs, cbias, sd, losses2 = fit_logit(X, N, P, Y, F, W)
+    Z, sd = standardize(F)
+    LQ = base_lq(X, N, P, W)
+    # 検証用: 古い6割で決めて、新しい4割で確かめる
+    cut = int(len(Y) * 0.6)
+    tr, te = np.arange(cut), np.arange(cut, len(Y))
+    W_tr, _ = fit(X[tr], N[tr], P[tr], Y[tr])
+    LQ_tr = base_lq(X, N, P, W_tr)
+    combos = {}
+    nfeat = len(FEATURES)
+    for mask in range(1 << (nfeat + 1)):
+        feats = [i for i in range(nfeat) if mask >> i & 1]
+        use_cb = bool(mask >> nfeat & 1)
+        c_tr, b_tr = fit_logit(LQ_tr, Z, Y, feats, use_cb, rows=tr)
+        ev = evaluate(LQ_tr, Z, Y, c_tr, b_tr, te)
+        c_all, b_all = fit_logit(LQ, Z, Y, feats, use_cb)
+        combos[str(mask)] = {"coef": c_all, "cbias": b_all, "eval": ev}
+        print(f"組み合わせ {mask:3d}: {ev}")
+    full = combos[str((1 << (nfeat + 1)) - 1)]
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"month": f"{today:%Y-%m}", "m": M, "races": int(len(Y)),
                    "from": first.isoformat(), "to": last.isoformat(), "loss": losses,
                    "W": np.round(W, 4).tolist(),
-                   "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": sd,
-                   "coef": coefs, "cbias": cbias, "loss2": losses2}, f, ensure_ascii=False)
-    print(f"重みを作成: {len(Y)}レースで学習 logloss {losses} → 材料込み {losses2}")
-    print("係数(先頭は今の確率、続いて", FEATURE_NAMES, "):", coefs)
+                   "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
+                   "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)),
+                   "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"重みを作成: {len(Y)}レース、組み合わせ {len(combos)}通り")
 
 
 if __name__ == "__main__":

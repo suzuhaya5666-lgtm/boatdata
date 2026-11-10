@@ -634,6 +634,11 @@ function demeQ(order, racers, vstat, model) {
 const CLS_NUM = { A1: 4, A2: 3, B1: 2, B2: 1 };
 function demeAdjust(q, order, ents, racers, bi, model) {
   if (!model.coef) return { q, used: [] };
+  // 選んだ材料の組み合わせで決め直した係数を使う
+  const nf = model.features.length;
+  const mask = state.featMask ?? ((1 << (nf + 1)) - 1);
+  const combo = model.combos?.[mask] || { coef: model.coef, cbias: model.cbias };
+  model = { ...model, coef: combo.coef, cbias: combo.cbias };
   const val = (f, b) => {
     const e = ents[b] || {};
     if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
@@ -647,7 +652,7 @@ function demeAdjust(q, order, ents, racers, bi, model) {
   model.features.forEach((f, i) => {
     const raw = [1, 2, 3, 4, 5, 6].map((k) => val(f, order[k]));
     const have = raw.filter((x) => x != null && !Number.isNaN(x));
-    if (have.length) used.push(model.feature_names[i]);
+    if (have.length && (mask >> i & 1)) used.push(model.feature_names[i]);
     const mean = have.length ? have.reduce((a, b) => a + b, 0) / have.length : 0;
     [1, 2, 3, 4, 5, 6].forEach((k, n) => { Z[k][i] = ((raw[n] ?? mean) - mean) / model.sd[i]; });
   });
@@ -662,7 +667,8 @@ function demeAdjust(q, order, ents, racers, bi, model) {
     const sum = ex.reduce((a, b) => a + b, 0);
     [1, 2, 3, 4, 5, 6].forEach((k, n) => { out[k][j] = ex[n] / sum; });
   }
-  return { q: out, used };
+  if (mask >> nf & 1) used.push("コース補正");
+  return { q: out, used, ev: combo.eval };
 }
 function demeTri(q) {
   const out = [];
@@ -751,6 +757,7 @@ async function drawDemeTab(v, race) {
         入れ替えたい2つの枠を順にタップすると入れ替わります。</div>
       ${custom ? '<button class="pill2" id="resetOrder" style="margin-top:8px">' + (bi?.start?.length === 6 ? "展示進入" : "枠なり") + "に戻す</button>" : ""}
     </div>
+    ${featCard(model, adj)}
     <div class="card">
       <h2>各艇の着順確率</h2>
       <div class="meta"><span>${hasExh ? "展示タイム込み" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
@@ -780,7 +787,7 @@ async function drawDemeTab(v, race) {
         重みは過去${model.races.toLocaleString()}レース（${model.from}〜${model.to}）で、実際の着順に一番合うように毎月作り直しています。</div>
       <div class="note" style="font-size:13px;line-height:1.7;margin-top:8px">
         そのうえで、${(model.feature_names || []).join("・")}をレース内で比べた差を、着ごとの係数で足しています（係数も毎月作り直し）。展示前は展示タイムを使わずに計算し、展示が取れたら自動で入ります。</div>
-      ${coefTable(model)}
+      ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? ((1 << (model.features.length + 1)) - 1)] || {}) })}
       <div class="tbl">${weightTable(model)}</div>
     </div>`;
 
@@ -798,10 +805,35 @@ async function drawDemeTab(v, race) {
     }
     drawDemeTab(v, race);
   });
+  document.querySelectorAll("#feats [data-f]").forEach((b) => b.onclick = () => {
+    const nf = model.features.length;
+    const cur = state.featMask ?? ((1 << (nf + 1)) - 1);
+    state.featMask = cur ^ (1 << Number(b.dataset.f));
+    drawDemeTab(v, race);
+  });
+  const fa = $("featAll");
+  if (fa) fa.onclick = () => { state.featMask = null; drawDemeTab(v, race); };
   const rb = $("resetOrder");
   if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race); };
 }
 
+function featCard(model, adj) {
+  if (!model.combos) return "";
+  const nf = model.features.length;
+  const all = (1 << (nf + 1)) - 1;
+  const mask = state.featMask ?? all;
+  const names = [...model.feature_names, "コース補正"];
+  const chips = names.map((nm, i) => `<button class="pill2 ${mask >> i & 1 ? "on" : ""}" data-f="${i}">${nm}</button>`).join("");
+  const ev = adj.ev;
+  const best = model.combos[all].eval;
+  return `<div class="card"><h2>計算に使う材料</h2>
+    <div class="seg" id="feats">${chips}</div>
+    ${ev ? `<div class="meta"><span>この組み合わせの検証（過去${model.eval_races.toLocaleString()}レース）:</span>
+      <span>3連単上位10点 <b>${ev.tri10}%</b></span><span>2連単上位3点 <b>${ev.ex3}%</b></span><span>単勝 <b>${ev.tan}%</b></span></div>` : ""}
+    <div class="note">コース別成績（自艇・他艇）はいつも使います。材料を外すと、残りの材料の係数を決め直したもので計算します。
+      ${mask !== all ? `全部使うと 3連単上位10点 ${best.tri10}%。<button class="pill2" id="featAll" style="margin-left:6px">全部に戻す</button>` : "今は全部使っています（いちばん当たる組み合わせ）。"}</div>
+  </div>`;
+}
 function coefTable(model) {
   if (!model.coef) return "";
   const rows = model.feature_names.map((nm, i) => `<tr><td style="text-align:left">${nm}</td>${[0, 1, 2].map((j) => {
