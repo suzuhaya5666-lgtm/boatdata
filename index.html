@@ -51,6 +51,17 @@
   nav button { flex: 1; border: 0; border-radius: 0; padding: 12px 0; background: none; color: var(--sub); }
   nav button.on { color: var(--accent); font-weight: 700; background: none; }
   .soon { color: var(--sub); }
+  td.name .nm { color: var(--accent); text-decoration: underline; text-decoration-color: #b8cff0; cursor: pointer; }
+  .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
+  .seg button { padding: 4px 10px; }
+  .note { color: var(--sub); font-size: 12px; margin-top: 6px; }
+  .own td { font-weight: 700; background: #f7faff; }
+  .hi { color: var(--hit); font-weight: 700; }
+  #modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+  #modal[hidden] { display: none; }
+  #modal .sheet { background: var(--bg); width: 100%; max-width: 900px; max-height: 88vh; overflow-y: auto;
+    border-radius: 16px 16px 0 0; padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); }
+  #modal .close { float: right; }
 </style>
 </head>
 <body>
@@ -66,14 +77,17 @@
 </header>
 
 <main id="view-race"></main>
+<main id="view-venue" hidden></main>
 <main id="view-bets" hidden>
   <div class="card soon">舟券の収支記録は次の段階で作ります。</div>
 </main>
 
 <nav>
   <button class="on" data-view="race">レース</button>
+  <button data-view="venue">場データ</button>
   <button data-view="bets">収支</button>
 </nav>
+<div id="modal" hidden><div class="sheet" id="sheet"></div></div>
 
 <script>
 const BETS = ["単勝", "複勝", "2連単", "2連複", "拡連複", "3連単", "3連複"];
@@ -156,7 +170,7 @@ function render() {
   const rows = race.entries.map((e) => `
     <tr>
       <td><span class="waku w${e.boat}">${e.boat}</span></td>
-      <td class="name">${esc(e.name || "")}${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}<br>
+      <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}<br>
         <small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}</small></td>
       <td>${fmt(e.nat_win)}<br><small>${fmt(e.nat_2, 1)}%</small></td>
       <td>${fmt(e.loc_win)}<br><small>${fmt(e.loc_2, 1)}%</small></td>
@@ -213,8 +227,110 @@ $("next").addEventListener("click", () => step(1));
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
   $("view-race").hidden = b.dataset.view !== "race";
+  $("view-venue").hidden = b.dataset.view !== "venue";
   $("view-bets").hidden = b.dataset.view !== "bets";
+  document.querySelector("header").hidden = b.dataset.view !== "race";
+  if (b.dataset.view === "venue") renderVenue();
 }));
+
+// ---------------------------------------------------------------- 集計データ
+const pct = (a, n) => n ? (a / n * 100).toFixed(1) + "%" : "-";
+let venueStats = null;
+async function getVenueStats() {
+  if (!venueStats) venueStats = await getJSON("data/stats/venues.json");
+  return venueStats;
+}
+
+async function renderVenue() {
+  const box = $("view-venue");
+  let vs;
+  try { vs = await getVenueStats(); } catch (e) {
+    box.innerHTML = '<div class="empty">集計データがまだありません。</div>'; return;
+  }
+  const code = state.venue && vs.venues[state.venue] ? state.venue : Object.keys(vs.venues)[0];
+  const v = vs.venues[code];
+  const seg = Object.entries(vs.venues).map(([c, x]) =>
+    `<button data-sv="${c}" class="${c === code ? "on" : ""}">${esc(x.name)}</button>`).join("");
+  const crow = [1, 2, 3, 4, 5, 6].map((c) => {
+    const x = v.course[c];
+    const km = Object.entries(v.kimarite[c] || {}).sort((a, b) => b[1] - a[1]).slice(0, 2)
+      .map(([k, n]) => `${esc(k)}${n}`).join(" ");
+    return `<tr><td><span class="waku w${c}">${c}</span></td><td>${x.n}</td><td>${x.p1}</td><td>${x.p2}</td><td>${x.p3}</td>
+      <td class="${c === 1 ? "hi" : ""}">${pct(x.p1, x.n)}</td><td>${pct(x.p1 + x.p2, x.n)}</td><td>${pct(x.p1 + x.p2 + x.p3, x.n)}</td>
+      <td style="text-align:left">${km}</td></tr>`;
+  }).join("");
+  const rrow = Object.entries(v.race).map(([no, r]) => `
+    <tr><td>${no}R</td><td>${r.n}</td>
+      ${[1, 2, 3, 4, 5, 6].map((c) => `<td class="${c === 1 ? "hi" : ""}">${pct(r.course_win[c], r.n)}</td>`).join("")}
+      <td>${r.tri_avg ? r.tri_avg.toLocaleString() : "-"}</td><td>${r.tri_median ? r.tri_median.toLocaleString() : "-"}</td>
+      <td>${r.man_rate ?? "-"}%</td><td>${r.fav_rate ?? "-"}%</td></tr>`).join("");
+  box.innerHTML = `
+    <div class="seg">${seg}</div>
+    <div class="card"><h2>${esc(v.name)} コース別成績</h2>
+      <div class="meta"><span>${vs.period.from}〜${vs.period.to}</span></div>
+      <div class="tbl"><table><thead><tr><th>コース</th><th>出走</th><th>1着</th><th>2着</th><th>3着</th>
+        <th>1着率</th><th>2連対率</th><th>3連対率</th><th>主な決まり手</th></tr></thead><tbody>${crow}</tbody></table></div>
+    </div>
+    <div class="card"><h2>${esc(v.name)} レース別成績</h2>
+      <div class="tbl"><table><thead><tr><th>R</th><th>数</th>
+        ${[1, 2, 3, 4, 5, 6].map((c) => `<th>${c}コース<br>1着率</th>`).join("")}
+        <th>3連単<br>平均</th><th>3連単<br>中央値</th><th>万舟率</th><th>1番人気<br>決着率</th></tr></thead>
+        <tbody>${rrow}</tbody></table></div>
+      <div class="note">平均は高配当に引っぱられるので、ふだんの配当の目安は中央値を見てください。</div>
+    </div>`;
+  box.querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => {
+    state.venue = b.dataset.sv; store.set("venue", state.venue); renderVenue();
+  }));
+}
+
+async function openRacer(regno, course) {
+  $("modal").hidden = false;
+  $("sheet").innerHTML = '<div class="empty">読み込み中…</div>';
+  let r;
+  try { r = await getJSON(`data/stats/racers/${regno}.json`); } catch (e) {
+    $("sheet").innerHTML = '<button class="close" id="mclose">閉じる</button><div class="empty">この選手の集計はまだありません。</div>';
+    $("mclose").onclick = closeModal; return;
+  }
+  const draw = (c) => {
+    const own = r.course[c] || { n: 0, p1: 0, p2: 0, p3: 0 };
+    const rows = [1, 2, 3, 4, 5, 6].map((k) => {
+      const x = k === c ? own : (r.others[c]?.[k] || { n: 0, p1: 0, p2: 0, p3: 0 });
+      return `<tr class="${k === c ? "own" : ""}"><td>${k}コース<br><small>${k === c ? "(自艇)" : "(他艇)"}</small></td>
+        <td>${x.n}</td><td>${x.p1}</td><td>${x.p2}</td><td>${x.p3}</td>
+        <td>${pct(x.p1, x.n)}</td><td>${pct(x.p2, x.n)}</td><td>${pct(x.p3, x.n)}</td></tr>`;
+    }).join("");
+    const seg = [1, 2, 3, 4, 5, 6].map((k) =>
+      `<button data-c="${k}" class="${k === c ? "on" : ""}">${k}コース(${r.course[k]?.n || 0})</button>`).join("");
+    const stRows = [["total", "全体"], ["c1", "1コース"], ["c2", "2コース"], ["c3", "3コース"], ["c4", "4コース"],
+      ["c5", "5コース"], ["c6", "6コース"], ["slow", "スロー(1〜3)"], ["dash", "ダッシュ(4〜6)"], ["day", "デイ"], ["night", "ナイター"]]
+      .map(([k, label]) => `<tr><td style="text-align:left">${label}</td><td>${r.st[k].avg != null ? r.st[k].avg.toFixed(2) : "-"}</td><td>${r.st[k].n}</td></tr>`).join("");
+    const total = Object.values(r.course).reduce((a, x) => a + x.n, 0);
+    $("sheet").innerHTML = `
+      <button class="close" id="mclose">閉じる</button>
+      <h2>${esc(r.name)} <small style="color:var(--sub)">${r.regno}</small></h2>
+      <div class="meta"><span>${r.period.from}〜${r.period.to}</span><span>出走 ${total}</span><span>F ${r.f}回</span></div>
+      <div class="card" style="margin-top:10px"><h2>コース別全艇成績</h2>
+        <div class="seg">${seg}</div>
+        <div class="tbl"><table><thead><tr><th>コース</th><th>出走</th><th>1着</th><th>2着</th><th>3着</th>
+          <th>1着率</th><th>2着率</th><th>3着率</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="note">自艇が${c}コースのレースで、各コースの艇が何着だったか。</div>
+      </div>
+      <div class="card"><h2>平均スタート</h2>
+        <div class="tbl"><table><thead><tr><th></th><th>平均ST</th><th>本数</th></tr></thead><tbody>${stRows}</tbody></table></div>
+        <div class="note">フライング・出遅れは平均から除いています。スロー・ダッシュはコース番号(1〜3/4〜6)で分けています。</div>
+      </div>
+      <div class="note">出走場: ${Object.entries(r.venues).map(([k, n]) => `${esc(k)}${n}`).join("・")}</div>`;
+    $("mclose").onclick = closeModal;
+    $("sheet").querySelectorAll("[data-c]").forEach((b) => b.addEventListener("click", () => draw(Number(b.dataset.c))));
+  };
+  draw(Number(course) || 1);
+}
+function closeModal() { $("modal").hidden = true; }
+$("modal").addEventListener("click", (ev) => { if (ev.target.id === "modal") closeModal(); });
+$("view-race").addEventListener("click", (ev) => {
+  const n = ev.target.closest(".nm");
+  if (n && n.dataset.reg) openRacer(n.dataset.reg, n.dataset.course);
+});
 
 init();
 </script>

@@ -10,6 +10,7 @@
 import argparse
 import datetime as dt
 import glob
+import gzip
 import json
 import os
 import re
@@ -68,14 +69,14 @@ def download(kind, d):
     return raw.decode("cp932", errors="replace")
 
 
-def sections(text, kind):
-    """場ごとの区切り(07KBGN〜07KEND など)を対象場だけ取り出す。"""
+def sections(text, kind, all_venues=False):
+    """場ごとの区切り(07KBGN〜07KEND など)を取り出す。通常は対象場だけ。"""
     out = {}
     cur = None
     for line in text.splitlines():
         m = re.match(rf"^(\d{{2}}){kind}BGN", line)
         if m:
-            cur = m.group(1) if m.group(1) in VENUES else None
+            cur = m.group(1) if (all_venues or m.group(1) in VENUES) else None
             if cur:
                 out[cur] = []
             continue
@@ -91,28 +92,50 @@ def raw_path(kind, d):
     return os.path.join(DATA, "raw", kind, f"{d:%Y}", f"{kind.lower()}{d:%y%m%d}.txt")
 
 
-def load_raw(kind, d, reparse):
-    """保存済みの元テキストがあれば使い、無ければ取得して保存する。"""
-    p = raw_path(kind, d)
-    if os.path.exists(p):
-        with open(p, encoding="utf-8") as f:
-            return f.read(), False
-    if reparse:
-        return None, False
-    text = download(kind, d)
-    time.sleep(1)
-    if text is None:
-        return None, False
-    secs = sections(text, kind)
+def raw_all_path(d):
+    """成績は選手別成績のため全24場分を圧縮して保存する。"""
+    return os.path.join(DATA, "raw", "K", f"{d:%Y}", f"k{d:%y%m%d}.all.txt.gz")
+
+
+def keep(secs, kind):
     kept = []
     for code, lines in secs.items():
         kept.append(f"{code}{kind}BGN")
         kept.extend(lines)
         kept.append(f"{code}{kind}END")
+    return "\n".join(kept) + "\n"
+
+
+def load_raw(kind, d, reparse):
+    """保存済みの元テキストがあれば使い、無ければ取得して保存する。"""
+    if kind == "K":
+        pa = raw_all_path(d)
+        if os.path.exists(pa):
+            with gzip.open(pa, "rt", encoding="utf-8") as f:
+                return f.read(), False
+    p = raw_path(kind, d)
+    if reparse or (kind == "B" and os.path.exists(p)):
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                return f.read(), False
+        return None, False
+    text = download(kind, d)
+    time.sleep(1)
+    if text is None:
+        return None, False
+    if kind == "K":
+        os.makedirs(os.path.dirname(raw_all_path(d)), exist_ok=True)
+        with gzip.open(raw_all_path(d), "wt", encoding="utf-8") as f:
+            f.write(keep(sections(text, "K", all_venues=True), "K"))
+        if os.path.exists(p):
+            os.remove(p)  # 5場だけの古い保存は不要
+        with gzip.open(raw_all_path(d), "rt", encoding="utf-8") as f:
+            return f.read(), True
     os.makedirs(os.path.dirname(p), exist_ok=True)
+    body = keep(sections(text, kind), kind)
     with open(p, "w", encoding="utf-8") as f:
-        f.write("\n".join(kept) + "\n")
-    return "\n".join(kept), True
+        f.write(body)
+    return body, True
 
 
 # ---------------------------------------------------------------- 解析
@@ -314,7 +337,9 @@ def main():
     ap.add_argument("--start", default="")
     ap.add_argument("--end", default="")
     ap.add_argument("--reparse", action="store_true")
+    ap.add_argument("--max-minutes", type=float, default=100)
     a = ap.parse_args()
+    t0 = time.time()
     today = dt.datetime.now(JST).date()
     start = dt.datetime.strptime(a.start, "%Y%m%d").date() if a.start.strip() else today - dt.timedelta(days=2)
     end = dt.datetime.strptime(a.end, "%Y%m%d").date() if a.end.strip() else today
@@ -322,6 +347,9 @@ def main():
         start, end = end, start
     d = start
     while d <= end:
+        if time.time() - t0 > a.max_minutes * 60:
+            print(f"時間切れのため {d:%Y-%m-%d} の手前で終了。もう一度実行すると続きから取ります。")
+            break
         try:
             process(d, a.reparse)
         except Exception as e:  # 1日失敗しても続ける
