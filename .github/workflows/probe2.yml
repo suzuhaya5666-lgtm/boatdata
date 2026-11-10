@@ -1,0 +1,40 @@
+name: probe2
+# 調査用: 複数ページを取り、キーワードを含むリンクと前後の文字をログに出す(保存しない)
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "調べるURL(空白区切り)"
+        required: true
+      keys:
+        description: "探す語(|区切り)"
+        default: "展示|tenji|original|オリジナル|直前|before|周回|まわり|直線"
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          i=0
+          for u in ${{ inputs.urls }}; do
+            i=$((i+1))
+            curl -sSL -4 -A "Mozilla/5.0" --max-time 40 "$u" -o p$i.html -w "== $u -> %{http_code} %{size_download}B final=%{url_effective}\n" || echo "== $u failed"
+          done
+          python3 - <<'PY'
+          import re, glob, html
+          keys = r"${{ inputs.keys }}"
+          for p in sorted(glob.glob("p*.html")):
+              h = open(p, encoding="utf-8", errors="replace").read()
+              print("\n#####", p, len(h))
+              links = set()
+              for m in re.finditer(r'<a[^>]+href="([^"]+)"[^>]*>(.*?)</a>', h, re.S):
+                  t = re.sub(r"<[^>]+>", "", m.group(2)).strip()
+                  if re.search(keys, m.group(1) + t, re.I):
+                      links.add((m.group(1), t[:40]))
+              for l in sorted(links)[:80]: print("LINK", l)
+              for m in re.finditer(r'(src|href|url)\s*[=:]\s*["\']([^"\']*(?:json|api|php|ajax)[^"\']*)', h, re.I):
+                  print("API", m.group(2)[:200])
+              body = re.sub(r"\s+", " ", re.sub(r"<script.*?</script>|<style.*?</style>", "", h, flags=re.S))
+              for m in re.finditer(keys, body):
+                  print("CTX", html.unescape(re.sub(r"<[^>]+>", " ", body[max(0, m.start()-150): m.end()+250]))[:300])
+                  break
+          PY
