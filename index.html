@@ -137,6 +137,10 @@
   .slot { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; }
   .slot small { color: var(--sub); font-size: 11px; }
   .slot.on { background: #fff3bf; border-color: #f59f00; color: var(--ink); }
+  .slot.cutbtn.on { background: #f1f3f5; border-color: #868e96; }
+  .slot.cutbtn.on .mini { opacity: .35; }
+  .slot.cutbtn.on small { color: #e03131; font-weight: 800; }
+  tr.cutrow td { color: #adb5bd; }
   .slot .mini { width: 30px; height: 30px; line-height: 30px; font-size: 16px; }
   table.wt { font-size: 12px; margin-top: 4px; }
   table.wt td, table.wt th { padding: 4px 2px; }
@@ -1284,21 +1288,31 @@ async function drawDemeTab(v, race) {
   const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model);
   const q = adj.q;
   const hasExh = adj.used.includes("展示タイム");
-  const tri = demeTri(q);
+  const boatOf = (c) => order[c];
+  // 切る艇: その艇が3着以内に来ない前提で、残りの組み合わせだけで確率を出し直す
+  state.cuts = state.cuts || {};
+  const cut = new Set(state.cuts[key] || []);
+  const triAll = demeTri(q);
+  let tri = triAll, keep = 1;
+  if (cut.size) {
+    tri = triAll.filter((t) => !t.c.some((c) => cut.has(boatOf(c))));
+    keep = tri.reduce((a, t) => a + t.p, 0);
+    tri = tri.map((t) => ({ ...t, p: t.p / keep }));
+  }
   // 表に出す各着の確率は、120通りを足し合わせた本当の確率(コース別)
   const marg = {};
   for (let k = 1; k <= 6; k++) marg[k] = [0, 0, 0];
   tri.forEach((t) => t.c.forEach((k, j) => { marg[k][j] += t.p; }));
   const done = race.entries.some((e) => e.place === 1);
   const res = done ? [1, 2, 3].map((p) => race.entries.find((e) => e.place === p)?.boat) : null;
-  const boatOf = (c) => order[c];
   const bb = (b) => `<span class="mini k${b}">${b}</span>`;
   const isHit = (boats) => res && boats.every((b, i) => b === res[i]);
 
   // 各艇の確率表(コース順)
-  const cols = [0, 1, 2].map((j) => ranks([1, 2, 3, 4, 5, 6].map((c) => marg[c][j])));
+  const cols = [0, 1, 2].map((j) => ranks([1, 2, 3, 4, 5, 6].map((c) => cut.has(boatOf(c)) ? -1 : marg[c][j])));
   const rows = [1, 2, 3, 4, 5, 6].map((c, i) => {
     const e = ents[boatOf(c)];
+    if (cut.has(e.boat)) return `<tr class="cutrow"><td>${c}</td>${lane(e)}<td colspan="5">切り</td></tr>`;
     return `<tr><td class="${c !== e.boat ? "moved" : ""}">${c}</td>${lane(e)}
       ${[0, 1, 2].map((j) => `<td class="${cols[j][i]}">${(marg[c][j] * 100).toFixed(1)}%</td>`).join("")}
       <td>${((marg[c][0] + marg[c][1]) * 100).toFixed(1)}%</td><td>${((marg[c][0] + marg[c][1] + marg[c][2]) * 100).toFixed(1)}%</td></tr>`;
@@ -1333,6 +1347,14 @@ async function drawDemeTab(v, race) {
     </div>
     ${featCard(model, adj)}
     <div class="card">
+      <h2>切る艇</h2>
+      <div class="slots">${[1, 2, 3, 4, 5, 6].map((b) => `<button class="slot cutbtn ${cut.has(b) ? "on" : ""}" data-cut="${b}"><small>${cut.has(b) ? "切り" : "&nbsp;"}</small>${bb(b)}</button>`).join("")}</div>
+      <div class="note">${cut.size
+        ? `${[...cut].sort().map(bb).join("・")} が3着以内に来ない前提で、残りの組み合わせだけで確率を出し直しています。この前提になる確率（切った艇がどれも3着以内に来ない確率）は <b>${(keep * 100).toFixed(1)}%</b>。`
+        : "3着以内に来ないと思う艇をタップすると、その艇を除いた確率に出し直します（3艇まで）。"}</div>
+      ${cut.size ? '<button class="pill2" id="resetCut" style="margin-top:8px">切りをすべて解除</button>' : ""}
+    </div>
+    <div class="card">
       <h2>各艇の着順確率</h2>
       <div class="meta"><span>${hasExh ? "展示タイム込み" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
       <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th><th>3連対</th></tr></thead>
@@ -1340,7 +1362,7 @@ async function drawDemeTab(v, race) {
     </div>
     <div class="card">
       <h2>3連単 上位20点</h2>
-      ${res ? `<div class="meta"><span>結果 ${res.map(bb).join("-")} は ${hitRank + 1}番目（${(triB[hitRank].p * 100).toFixed(1)}%）</span></div>` : ""}
+      ${res ? `<div class="meta"><span>${hitRank >= 0 ? `結果 ${res.map(bb).join("-")} は ${hitRank + 1}番目（${(triB[hitRank].p * 100).toFixed(1)}%）` : `結果 ${res.map(bb).join("-")} には切った艇が入っています`}</span></div>` : ""}
       <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
         <tbody>${triRows}</tbody></table></div>
       <div class="note">目安オッズは 1÷確率。実際のオッズがこれより高ければ、確率の上では割に合う買い目です。上位20点の合計 ${(triB.slice(0, 20).reduce((a, t) => a + t.p, 0) * 100).toFixed(1)}%。</div>
@@ -1387,6 +1409,14 @@ async function drawDemeTab(v, race) {
   });
   const fa = $("featAll");
   if (fa) fa.onclick = () => { state.featMask = null; drawDemeTab(v, race); };
+  $("view-race").querySelectorAll("[data-cut]").forEach((b) => b.onclick = () => {
+    const n = Number(b.dataset.cut);
+    if (cut.has(n)) cut.delete(n); else if (cut.size < 3) cut.add(n);
+    if (cut.size) state.cuts[key] = [...cut]; else delete state.cuts[key];
+    drawDemeTab(v, race);
+  });
+  const rc = $("resetCut");
+  if (rc) rc.onclick = () => { delete state.cuts[key]; drawDemeTab(v, race); };
   const rb = $("resetOrder");
   if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race); };
 }
