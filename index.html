@@ -141,6 +141,9 @@
   table.wt { font-size: 12px; margin-top: 4px; }
   table.wt td, table.wt th { padding: 4px 2px; }
   table.wt td.na { color: #ccd; }
+  .stb { display: inline-block; font-size: 11px; font-weight: 800; margin-left: 4px; padding: 1px 4px; border-radius: 4px; background: #eef2f7; color: #495057; }
+  .stb:empty { display: none; }
+  .stb.fast { background: #ffe3e3; color: #c92a2a; } .stb.slow { background: #e7f5ff; color: #1864ab; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -390,8 +393,8 @@ function drawCardTab(v, race) {
   const rows = race.entries.map((e) => `
     <tr>
       <td><span class="waku w${e.boat}">${e.boat}</span></td>
-      <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}<br>
-        <small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}</small></td>
+      <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}<span class="stb" id="stb${e.boat}"></span><br>
+        <small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}<span id="stc${e.boat}"></span></small></td>
       <td>${fmt(e.nat_win)}<br><small>${fmt(e.nat_2, 1)}%</small></td>
       <td>${fmt(e.loc_win)}<br><small>${fmt(e.loc_2, 1)}%</small></td>
       <td>${e.motor_no ?? "-"}<br><small>${fmt(e.motor_2, 1)}%</small></td>
@@ -400,6 +403,20 @@ function drawCardTab(v, race) {
       <td>${esc(e.st ?? "-")}</td>
       <td class="${e.place === 1 ? "p1" : ""}">${e.place ?? esc(statusText(e.status) || "-")}</td>
     </tr>`).join("");
+  // 平均ST(直近1年)を選手の集計から後から入れる
+  race.entries.forEach(async (e) => {
+    const r = await cached(`data/stats/racers/${e.regno}.json`);
+    const st = r?.sheet?.all?.st;
+    if (!st || state.dtab !== "card") return;
+    const b = $("stb" + e.boat), c = $("stc" + e.boat);
+    const fmtSt = (x) => x == null ? "-" : x.toFixed(2).replace(/^0/, "");
+    if (b && st.total.avg != null) {
+      b.textContent = "ST" + fmtSt(st.total.avg);
+      b.className = "stb " + (st.total.avg <= 0.14 ? "fast" : st.total.avg >= 0.18 ? "slow" : "");
+    }
+    const k = `c${e.course || e.boat}`;
+    if (c && st[k]) c.textContent = ` ・${e.course || e.boat}コース ST${fmtSt(st[k].avg)}(${st[k].n}本)` + (r.sheet.all.f ? ` F${r.sheet.all.f}` : "");
+  });
 
   let pay = "";
   if (race.payouts && Object.keys(race.payouts).length) {
@@ -419,6 +436,7 @@ function drawCardTab(v, race) {
           <th>展示</th><th>進入</th><th>ST</th><th>着</th></tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
+      <div class="note">級別の横のSTは直近1年の平均スタート（フライング・出遅れは除く）。.14以下は赤、.18以上は青。その下はこのレースのコースでの平均STと本数。</div>
     </div>
     ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}`;
 }
