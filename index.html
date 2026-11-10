@@ -214,6 +214,8 @@
   input.amt { width: 56px; font-size: 16px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
   #mmode { font-size: 15px; padding: 6px; border-radius: 6px; border: 1px solid var(--line); }
   table.memo td.payc { text-align: right; }
+  .pop { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; }
+  .pop.over { background: #ffe3e3; color: #c92a2a; } .pop.fair { background: #f1f3f5; color: #495057; } .pop.under { background: #d3f9d8; color: #2b8a3e; }
   table.memo td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
   .plus { color: #2b8a3e; font-weight: 700; } .minus { color: #e03131; font-weight: 700; }
   /* ---- 場データ・選手 */
@@ -747,11 +749,19 @@ async function drawOddsTab(v, race, force) {
 
   // 確率と期待値
   const prob = (t, k) => dm?.prob?.[DEME_KEY[t]]?.[demeKey(t, k)] ?? null;
+  // オッズから見た確率(券種ごとに 1/オッズ を合計100%にそろえる=控除分を除く)と、出目確率を比べる
+  const mktSum = {};
+  Object.keys(od).forEach((t) => {
+    if (typeof od[t] !== "object" || !od[t]) return;
+    mktSum[t] = Object.values(od[t]).reduce((a, v) => a + (olo(v) > 0 ? 1 / olo(v) : 0), 0);
+  });
   const evCell = (t, k, val) => {
     const p = prob(t, k);
-    if (p == null || val == null) return "<td>-</td><td>-</td>";
-    const ev = p * olo(val);
-    return `<td>${(p * 100).toFixed(1)}%</td><td class="${ev >= 1 ? "val" : ""}">${ev.toFixed(2)}</td>`;
+    if (p == null || val == null || !(olo(val) > 0) || !mktSum[t]) return "<td>-</td><td>-</td><td>-</td>";
+    const q = (1 / olo(val)) / mktSum[t];
+    const r = p / q;  // 1より小さい=オッズほど来ない(買われすぎ)
+    const [lab, cls] = r < 0.8 ? ["過剰人気", "over"] : r > 1.25 ? ["過小人気", "under"] : ["そんなもん", "fair"];
+    return `<td>${(p * 100).toFixed(1)}%</td><td>${(q * 100).toFixed(1)}%</td><td><span class="pop ${cls}">${lab}</span></td>`;
   };
   const sel = (t, k) => memoHas(t, k) ? "osel" : "";
   const cell = (t, k, extra = "") => {
@@ -801,9 +811,9 @@ async function drawOddsTab(v, race, force) {
     body = types.map((t) => {
       const list = Object.entries(od[t] || {}).filter(([, val]) => olo(val) > 0)
         .sort((x, y) => state.oview === "pop" ? olo(x[1]) - olo(y[1]) : olo(y[1]) - olo(x[1]));
-      return `${types.length > 1 ? `<h3 class="oh">${ONAME[t]}</h3>` : ""}<div class="tbl"><table class="otbl rank"><thead><tr><th>順位</th><th>組番</th><th>オッズ</th><th>出目確率</th><th>期待値</th></tr></thead><tbody>${
+      return `${types.length > 1 ? `<h3 class="oh">${ONAME[t]}</h3>` : ""}<div class="tbl"><table class="otbl rank"><thead><tr><th>順位</th><th>組番</th><th>オッズ</th><th>出目確率</th><th>オッズの<br>確率</th><th>人気の評価</th></tr></thead><tbody>${
         list.map(([k, val], i) => `<tr class="${sel(t, k)}"><td>${i + 1}位</td><td>${k.split(/[-=]/).map(Number).map(bb).join(ORDERED[t] ? "-" : "=")}</td>${cell(t, k)}${evCell(t, k, val)}</tr>`).join("")}</tbody></table></div>`;
-    }).join("") + '<div class="note">期待値＝出目確率×オッズ。1以上（緑）は、確率のわりにオッズが高い目です。</div>';
+    }).join("") + '<div class="note">オッズの確率は、オッズから見た「みんなが思っている確率」（控除分を除いて合計100%にそろえた値）。出目確率がそれより2割以上低ければ「過剰人気」（買われすぎ）、2割5分以上高ければ「過小人気」（狙い目）、その間は「そんなもん」。</div>';
   } else {
     body = drawFormation(od, ents, types);
   }
