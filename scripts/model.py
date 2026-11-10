@@ -162,24 +162,29 @@ def fit_logit(X, N, P, Y, F, W):
     LQ = np.log(q / q.sum(1, keepdims=True) + 1e-12)
     Z, sd = standardize(F)
     idx = np.arange(len(Y))
-    coefs, losses = [], []
+    coefs, cbias, losses = [], [], []
     for j in range(3):
         excl = np.zeros((len(Y), 7))
         excl[:, 0] = 1
         for jj in range(j):
             excl[idx, Y[:, jj]] = 1
 
+        nf = len(FEATURES)
+
         def loss(t):
-            s = t[0] * LQ[:, :, j] + Z @ t[1:]
+            # コースの補正(全場共通): コース別成績だけでは内外の差が弱めに出るのを直す
+            cb = np.concatenate([[0], t[1 + nf:]])
+            s = t[0] * LQ[:, :, j] + Z @ t[1:1 + nf] + cb[None, :]
             s = np.where(excl == 1, -1e9, s)
             s = s - s.max(1, keepdims=True)
-            return -(s[idx, Y[:, j]] - np.log(np.exp(s).sum(1))).mean()
-        x0 = np.zeros(1 + len(FEATURES))
+            return -(s[idx, Y[:, j]] - np.log(np.exp(s).sum(1))).mean() + 0.001 * (t[1 + nf:] ** 2).sum()
+        x0 = np.zeros(1 + nf + 6)
         x0[0] = 1
         r = minimize(loss, x0, method="L-BFGS-B")
-        coefs.append(np.round(r.x, 4).tolist())
+        coefs.append(np.round(r.x[:1 + nf], 4).tolist())
+        cbias.append([0] + np.round(r.x[1 + nf:], 4).tolist())
         losses.append(round(float(r.fun), 4))
-    return coefs, np.round(sd, 4).tolist(), losses
+    return coefs, cbias, np.round(sd, 4).tolist(), losses
 
 
 def main():
@@ -192,14 +197,14 @@ def main():
                 return
     X, N, P, Y, F, first, last = build()
     W, losses = fit(X, N, P, Y)
-    coefs, sd, losses2 = fit_logit(X, N, P, Y, F, W)
+    coefs, cbias, sd, losses2 = fit_logit(X, N, P, Y, F, W)
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"month": f"{today:%Y-%m}", "m": M, "races": int(len(Y)),
                    "from": first.isoformat(), "to": last.isoformat(), "loss": losses,
                    "W": np.round(W, 4).tolist(),
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": sd,
-                   "coef": coefs, "loss2": losses2}, f, ensure_ascii=False)
+                   "coef": coefs, "cbias": cbias, "loss2": losses2}, f, ensure_ascii=False)
     print(f"重みを作成: {len(Y)}レースで学習 logloss {losses} → 材料込み {losses2}")
     print("係数(先頭は今の確率、続いて", FEATURE_NAMES, "):", coefs)
 

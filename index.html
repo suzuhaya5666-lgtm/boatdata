@@ -645,7 +645,8 @@ function demeAdjust(q, order, ents, racers, bi, model) {
   for (let k = 1; k <= 6; k++) out[k] = [0, 0, 0];
   for (let j = 0; j < 3; j++) {
     const c = model.coef[j];
-    const sc = [1, 2, 3, 4, 5, 6].map((k) => c[0] * Math.log(q[k][j]) + Z[k].reduce((a, z, i) => a + c[i + 1] * z, 0));
+    const cb = model.cbias ? model.cbias[j] : [0, 0, 0, 0, 0, 0, 0];
+    const sc = [1, 2, 3, 4, 5, 6].map((k) => c[0] * Math.log(q[k][j]) + Z[k].reduce((a, z, i) => a + c[i + 1] * z, 0) + cb[k]);
     const mx = Math.max(...sc);
     const ex = sc.map((x) => Math.exp(x - mx));
     const sum = ex.reduce((a, b) => a + b, 0);
@@ -799,7 +800,11 @@ function coefTable(model) {
     return `<td style="background:rgba(${c < 0 ? "21,101,192" : "232,89,12"},${w * 0.5})">${c > 0 ? "+" : ""}${c.toFixed(2)}</td>`;
   }).join("")}</tr>`).join("");
   return `<div class="tbl"><table class="wt"><thead><tr><th>材料</th><th>1着</th><th>2着</th><th>3着</th></tr></thead><tbody>
-    <tr><td style="text-align:left">コース別成績の確率</td>${[0, 1, 2].map((j) => `<td>${model.coef[j][0].toFixed(2)}</td>`).join("")}</tr>${rows}</tbody></table></div>
+    <tr><td style="text-align:left">コース別成績の確率</td>${[0, 1, 2].map((j) => `<td>${model.coef[j][0].toFixed(2)}</td>`).join("")}</tr>${rows}
+    ${model.cbias ? [1, 2, 3, 4, 5, 6].map((k) => `<tr><td style="text-align:left">${k}コースの補正</td>${[0, 1, 2].map((j) => {
+      const c = model.cbias[j][k];
+      return `<td style="background:rgba(${c < 0 ? "21,101,192" : "232,89,12"},${Math.min(Math.abs(c) / 0.9, 1) * 0.5})">${c > 0 ? "+" : ""}${c.toFixed(2)}</td>`;
+    }).join("")}</tr>`).join("") : ""}</tbody></table></div>
     <div class="note">材料の数字は、レース内で平均より1目盛り(標準的なばらつき)上のときの効き。＋は上の着に来やすく、−は来にくい。展示タイムと平均STは小さいほど良いので−が「効いている」向きです。</div>`;
 }
 function weightTable(model) {
