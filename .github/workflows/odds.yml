@@ -1,0 +1,41 @@
+name: odds
+
+# 締切時オッズ(2連単・2連複・3連単・3連複)を取る。
+# 毎朝、前日分を取る。過去分は開始日・終了日を入れて手動で実行(続きから取る)。
+on:
+  schedule:
+    - cron: "37 0 * * *"   # 9:37(日本時間)
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "開始日 YYYYMMDD(空なら前日)"
+        required: false
+        default: ""
+      end:
+        description: "終了日 YYYYMMDD(空なら今日)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: odds
+  cancel-in-progress: false
+
+jobs:
+  odds:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: オッズの取得
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python -u scripts/odds.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes 330 --push-every 200
