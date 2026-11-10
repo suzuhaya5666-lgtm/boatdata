@@ -110,7 +110,9 @@ def load_raw(kind, d, reparse):
     """保存済みの元テキストがあれば使い、無ければ取得して保存する。"""
     if kind == "K":
         pa = raw_all_path(d)
-        if os.path.exists(pa):
+        # 成績ファイルは場が終わるごとに中身が増えるので、直近2日分はいつも取り直す
+        recent = d >= dt.datetime.now(JST).date() - dt.timedelta(days=1)
+        if os.path.exists(pa) and (reparse or not recent):
             with gzip.open(pa, "rt", encoding="utf-8") as f:
                 return f.read(), False
     p = raw_path(kind, d)
