@@ -46,9 +46,6 @@ jobs:
         run: |
           python scripts/collect.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" ${{ inputs.reparse && '--reparse' || '' }}
 
-      - name: 成績の集計
-        run: python scripts/stats.py
-
       - name: 保存
         run: |
           git config user.name "github-actions[bot]"
