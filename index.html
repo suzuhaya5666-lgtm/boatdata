@@ -105,6 +105,24 @@
   .nm[data-reg] { color: var(--accent); cursor: pointer; }
   td.name .nm { text-decoration: underline; text-decoration-color: #b8cff0; }
 
+  /* ---- 詳細タブ */
+  .dtabs { display: flex; margin-top: 10px; border-bottom: 1px solid var(--line); overflow-x: auto; }
+  .dtabs button { flex: 1; border: 0; border-radius: 0; background: none; padding: 8px 4px; color: var(--sub); font-weight: 700; white-space: nowrap;
+    border-bottom: 3px solid transparent; }
+  .dtabs button.on { color: var(--ink); border-bottom-color: var(--ink); background: none; }
+  .pill2 { border-radius: 999px !important; padding: 6px 14px !important; font-weight: 700; }
+  .pill2.on { background: var(--ink) !important; border-color: var(--ink) !important; }
+  table.cmp td { padding: 6px 4px; }
+  table.cmp td.lk { width: 34px; font-weight: 800; font-size: 16px; padding: 0; }
+  table.cmp td.name { min-width: 92px; font-weight: 700; }
+  table.cmp .pv { font-size: 15px; }
+  .cnt { color: #98a1ad; }
+  td.r1 .pv, td.r1 { }
+  td.r1 { background: #ffd8cc; } td.r2 { background: #fff3bf; }
+  td.bad .pv { color: #e03131; }
+  td.moved { color: #e03131; font-weight: 800; }
+  .new { color: #e03131; font-weight: 800; }
+  .part { display: inline-block; background: #fff0f6; color: #c2255c; border-radius: 4px; padding: 1px 5px; margin: 1px; font-size: 12px; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -315,14 +333,26 @@ function drawList() {
 function drawDetail() {
   const v = state.day.venues[state.venue];
   const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
+  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示情報"], ["motor", "モーター成績"]];
+  state.dtab = state.dtab || "card";
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
-    <div class="chips">${nos.map((n) => `<button data-r="${n}" class="${n === state.race ? "on" : ""}">${n}R</button>`).join("")}</div>`;
+    <div class="chips">${nos.map((n) => `<button data-r="${n}" class="${n === state.race ? "on" : ""}">${n}R</button>`).join("")}</div>
+    <div class="dtabs">${tabs.map(([k, l]) => `<button data-t="${k}" class="${k === state.dtab ? "on" : ""}">${l}</button>`).join("")}</div>`;
   $("back").onclick = () => go("list");
   $("barIn").querySelectorAll("[data-r]").forEach((b) =>
     b.addEventListener("click", () => go("detail", { race: Number(b.dataset.r) })));
+  $("barIn").querySelectorAll("[data-t]").forEach((b) =>
+    b.addEventListener("click", () => { state.dtab = b.dataset.t; drawDetail(); window.scrollTo(0, 0); }));
 
   const race = v.races[String(state.race)];
+  if (state.dtab === "racer") return drawRacerTab(v, race);
+  if (state.dtab === "exh") return drawExhTab(v, race);
+  if (state.dtab === "motor") return drawMotorTab(v, race);
+  drawCardTab(v, race);
+}
+
+function drawCardTab(v, race) {
   const w = race.weather;
   const meta = [
     race.deadline ? `締切 ${race.deadline}` : "",
@@ -365,6 +395,207 @@ function drawDetail() {
       </table></div>
     </div>
     ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}`;
+}
+
+// ---------------------------------------------------------------- 共通
+const cache = {};
+async function cached(path) {
+  if (!(path in cache)) {
+    cache[path] = getJSON(path).catch(() => null);
+  }
+  return cache[path];
+}
+const loading = () => { $("view-race").innerHTML = '<div class="empty">読み込み中…</div>'; };
+const pctv = (a, n) => n ? a / n * 100 : null;
+const pcell = (a, n, cls = "") => n
+  ? `<td class="${cls}"><span class="pv">${(a / n * 100).toFixed(1)}<small>%</small></span><br><small class="cnt">(${a}/${n}回)</small></td>`
+  : `<td class="${cls}">-</td>`;
+// 列ごとに1番を赤、2番を黄で塗る
+function ranks(values) {
+  const uniq = [...new Set(values.filter((x) => x != null && x > 0))].sort((a, b) => b - a);
+  return values.map((x) => x == null || x <= 0 ? "" : x === uniq[0] ? "r1" : x === uniq[1] ? "r2" : "");
+}
+function lane(e) {
+  return `<td class="lk k${e.boat}">${e.boat}</td>
+    <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.boat}">${esc(e.name || "")}</span>
+      ${e.class ? `<br><span class="cls ${e.class}">${e.class}</span>` : ""}</td>`;
+}
+function chipRow(id, opts, cur) {
+  return `<div class="seg" id="${id}">${opts.map(([k, l]) => `<button data-p="${k}" class="pill2 ${k === cur ? "on" : ""}">${l}</button>`).join("")}</div>`;
+}
+
+// ---------------------------------------------------------------- 選手成績
+async function drawRacerTab(v, race) {
+  loading();
+  const files = await Promise.all(race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`)));
+  if (state.dtab !== "racer") return;
+  state.rp = state.rp || "10";
+  state.kp = state.kp || "6m";
+  const pick = (r, period, c) => {
+    if (!r || !r.bycourse) return null;
+    if (period === "local") return r.bycourse.local?.[state.venue]?.[c] || null;
+    return r.bycourse[period]?.[c] || null;
+  };
+  // 枠別着率(枠番=コースとして、その選手がそのコースで走ったときの成績)
+  const rows = race.entries.map((e, i) => ({ e, b: pick(files[i], state.rp, String(e.boat)) }));
+  const cols = [
+    (b) => b ? [b.p1 + b.p2 + b.p3, b.n] : null,
+    (b) => b ? [b.p1, b.n] : null,
+    (b) => b ? [b.p2, b.n] : null,
+    (b) => b ? [b.p3, b.n] : null,
+  ];
+  const rk = cols.map((f) => ranks(rows.map(({ b }) => { const x = f(b); return x ? pctv(x[0], x[1]) : null; })));
+  const t1 = rows.map(({ e, b }, i) => `<tr>${lane(e)}${cols.map((f, j) => { const x = f(b); return x ? pcell(x[0], x[1], rk[j][i]) : "<td>-</td>"; }).join("")}</tr>`).join("");
+
+  // 決まり手
+  const krow = race.entries.map((e, i) => {
+    const b = pick(files[i], state.kp, String(e.boat));
+    return { e, b };
+  });
+  const keys1 = [["win", "逃げ", "逃げ"], ["lost", "差し", "差され"], ["lost", "まくり", "まくられ"], ["lost", "まくり差し", "まくられ差"]];
+  const keysN = [["nigashi", null, "逃し"], ["win", "差し", "差し"], ["win", "まくり", "まくり"], ["win", "まくり差し", "まくり差し"]];
+  const val = (b, [grp, k]) => {
+    if (!b) return null;
+    if (grp === "nigashi") return [b.nigashi || 0, b.n];
+    return [b[grp]?.[k] || 0, b.n];
+  };
+  const one = krow[0];
+  const t2a = `<tr>${lane(one.e)}${keys1.map((k, j) => {
+    const x = val(one.b, k);
+    return x ? pcell(x[0], x[1], j > 0 && x[0] ? "bad" : "") : "<td>-</td>";
+  }).join("")}</tr>`;
+  const others = krow.slice(1);
+  const rk2 = keysN.map((k) => ranks(others.map(({ b }) => { const x = val(b, k); return x ? pctv(x[0], x[1]) : null; })));
+  const t2b = others.map(({ e, b }, i) => `<tr>${lane(e)}${keysN.map((k, j) => {
+    if (j === 0 && e.boat !== 2) return "<td>-</td>";
+    const x = val(b, k);
+    return x ? pcell(x[0], x[1], j === 0 ? "" : rk2[j][i]) : "<td>-</td>";
+  }).join("")}</tr>`).join("");
+
+  $("view-race").innerHTML = `
+    <div class="card">
+      <h2>枠別着率</h2>
+      ${chipRow("rp", [["10", "直近10走"], ["6m", "直近6ヶ月"], ["1y", "直近1年"], ["local", "当地"]], state.rp)}
+      <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>3連対率</th><th>1着率</th><th>2着率</th><th>3着率</th></tr></thead>
+        <tbody>${t1}</tbody></table></div>
+      <div class="note">それぞれの選手が、この枠と同じコースで走ったときの成績です（直近10走はそのコースでの直近10回）。当地は${esc(v.name)}での直近1年。</div>
+    </div>
+    <div class="card">
+      <h2>決まり手率</h2>
+      ${chipRow("kp", [["6m", "直近6ヶ月"], ["1y", "直近1年"]], state.kp)}
+      <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>逃げ</th><th>差され</th><th>まくられ</th><th>まくられ差</th></tr></thead>
+        <tbody>${t2a}</tbody></table></div>
+      <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>逃し</th><th>差し</th><th>まくり</th><th>まくり差し</th></tr></thead>
+        <tbody>${t2b}</tbody></table></div>
+      <div class="note">1号艇は1コースで走ったとき、逃げ切った率と、差し・まくり・まくり差しで負けた率。2〜6号艇はそのコースで、差し・まくり・まくり差しで勝った率。逃しは2コースで1コースに逃げられた率。</div>
+    </div>`;
+  $("rp").querySelectorAll("button").forEach((b) => b.onclick = () => { state.rp = b.dataset.p; drawRacerTab(v, race); });
+  $("kp").querySelectorAll("button").forEach((b) => b.onclick = () => { state.kp = b.dataset.p; drawRacerTab(v, race); });
+}
+
+// ---------------------------------------------------------------- 展示情報
+const WIND = ["", "北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東", "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"];
+async function drawExhTab(v, race) {
+  loading();
+  const hd = state.date.replace(/-/g, "");
+  const bi = await getJSON(`data/before/${hd}/${state.venue}_${String(race.no).padStart(2, "0")}.json`).catch(() => null);
+  if (state.dtab !== "exh") return;
+  const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
+  const hasResult = race.entries.some((e) => e.course);
+
+  // 進入: スタート展示があればその順、なければ本番の進入
+  let order = null, orderLabel = "";
+  if (bi?.start?.length === 6) { order = bi.start; orderLabel = "スタート展示"; }
+  else if (hasResult) {
+    order = race.entries.filter((e) => e.course).sort((a, b) => a.course - b.course)
+      .map((e) => ({ course: e.course, boat: e.boat, st: e.st }));
+    orderLabel = "本番の進入（結果より）";
+  }
+  const exhOf = (b) => bi?.entries?.[b]?.exh ?? ents[b]?.exh ?? null;
+  const times = [1, 2, 3, 4, 5, 6].map(exhOf);
+  const best = Math.min(...times.filter((x) => x != null));
+  const sorted = [...new Set(times.filter((x) => x != null))].sort((a, b) => a - b);
+  const rcls = (x) => x == null ? "" : x === sorted[0] ? "r1" : x === sorted[1] ? "r2" : "";
+  const rows = (order || [1, 2, 3, 4, 5, 6].map((b) => ({ course: b, boat: b }))).map((o) => {
+    const e = ents[o.boat] || { boat: o.boat };
+    const b = bi?.entries?.[o.boat] || {};
+    const x = exhOf(o.boat);
+    const moved = order && o.course !== o.boat;
+    return `<tr>
+      <td class="${moved ? "moved" : ""}">${order ? o.course : "-"}</td>${lane(e)}
+      <td class="${rcls(x)}">${x != null ? x.toFixed(2) : "-"}${x != null && x !== best ? `<br><small class="cnt">+${(x - best).toFixed(2)}</small>` : ""}</td>
+      <td>${o.st ? esc(o.st) : "-"}</td>
+      <td>${b.tilt != null ? b.tilt.toFixed(1) : "-"}</td>
+      <td>${b.propeller ? `<span class="new">${esc(b.propeller)}</span>` : "-"}</td>
+      <td style="white-space:normal">${b.parts?.length ? b.parts.map((p) => `<span class="part">${esc(p)}</span>`).join("") : "-"}</td>
+      <td>${b.weight ? esc(b.weight) + "kg" : "-"}${b.adjust ? `<br><small class="cnt">調整${b.adjust}</small>` : ""}</td>
+    </tr>`;
+  }).join("");
+  const w = bi?.weather;
+  const wline = w ? `<div class="meta"><span>${w.as_of ? w.as_of + "R時点" : ""}</span><span>${esc(w.sky || "")}</span>
+      <span>風 ${WIND[w.wind_dir] || ""} ${w.wind ?? "-"}m</span><span>波 ${w.wave ?? "-"}cm</span>
+      <span>気温 ${w.air ?? "-"}℃</span><span>水温 ${w.water ?? "-"}℃</span></div>` : "";
+  const status = bi ? `取得 ${esc(bi.fetched || "")}${bi.complete ? "" : "（途中）"}`
+    : hasResult ? "直前情報は取れていません。展示タイムと進入は結果ファイルの値です。"
+      : "直前情報はまだありません。締切の45分前から10分ごとに取りに行きます。";
+  $("view-race").innerHTML = `
+    <div class="card">
+      <h2>展示情報</h2>
+      ${wline}
+      <div class="tbl"><table class="cmp exh"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>展示<br>タイム</th>
+        <th>${order === bi?.start ? "展示ST" : "ST"}</th><th>チルト</th><th>プロペラ</th><th>部品交換</th><th>体重</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${status}</div>
+    </div>`;
+}
+
+// ---------------------------------------------------------------- モーター成績
+async function drawMotorTab(v, race) {
+  loading();
+  const ms = await cached("data/stats/motors.json");
+  if (state.dtab !== "motor") return;
+  const mv = ms?.venues?.[state.venue];
+  if (!mv) { $("view-race").innerHTML = '<div class="empty">モーターの集計がまだありません。</div>'; return; }
+  state.mp = state.mp || "all";
+  const all = Object.entries(mv.motors).map(([no, p]) => ({ no: Number(no), s: p[state.mp] }))
+    .filter((m) => m.s && m.s.n > 0)
+    .map((m) => ({ ...m, win: m.s.pts / m.s.n, r2: (m.s.p1 + m.s.p2) / m.s.n * 100, r3: (m.s.p1 + m.s.p2 + m.s.p3) / m.s.n * 100 }));
+  const rankBy = (key) => {
+    const s = [...all].sort((a, b) => b[key] - a[key]);
+    return Object.fromEntries(s.map((m, i) => [m.no, i + 1]));
+  };
+  const rWin = rankBy("win"), r2 = rankBy("r2");
+  const total = all.length;
+  const mine = race.entries.map((e) => ({ e, m: all.find((x) => x.no === e.motor_no) }));
+  const winRk = ranks(mine.map(({ m }) => m ? m.win : null));
+  const r2Rk = ranks(mine.map(({ m }) => m ? m.r2 : null));
+  const rows = mine.map(({ e, m }, i) => `<tr>${lane(e)}
+    <td>${e.motor_no ?? "-"}</td>
+    <td class="${winRk[i]}">${m ? m.win.toFixed(2) : "-"}${m ? `<br><small class="cnt">${rWin[m.no]}位/${total}機</small>` : ""}</td>
+    <td class="${r2Rk[i]}">${m ? m.r2.toFixed(1) + "%" : "-"}${m ? `<br><small class="cnt">${r2[m.no]}位/${total}機</small>` : ""}</td>
+    <td>${m ? m.r3.toFixed(1) + "%" : "-"}</td>
+    <td>${m ? m.s.n : "-"}</td>
+    <td>${e.motor_2 != null ? e.motor_2.toFixed(1) + "%" : "-"}</td></tr>`).join("");
+  const here = new Set(race.entries.map((e) => e.motor_no));
+  const top = [...all].sort((a, b) => b.win - a.win).map((m, i) => `
+    <tr class="${here.has(m.no) ? "own" : ""}"><td>${i + 1}</td><td>${m.no}</td><td>${m.win.toFixed(2)}</td>
+      <td>${m.r2.toFixed(1)}%</td><td>${m.r3.toFixed(1)}%</td><td>${m.s.n}</td></tr>`).join("");
+  $("view-race").innerHTML = `
+    <div class="card">
+      <h2>モーター成績</h2>
+      ${chipRow("mp", [["1m", "直近1ヶ月"], ["3m", "直近3ヶ月"], ["6m", "直近6ヶ月"], ["all", "全て"]], state.mp)}
+      <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>No</th><th>勝率<br><small>場内順位</small></th>
+        <th>2連対率<br><small>場内順位</small></th><th>3連対率</th><th>出走</th><th>公式<br>2連率</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+      <div class="note">今のモーターの使い始め（${esc(mv.start)}）からの成績です。「全て」はその期間すべて。勝率は1着10点・2着8点・3着6点・4着4点・5着2点・6着1点の平均。公式2連率は出走表の値です。</div>
+    </div>
+    <div class="card">
+      <h2>${esc(v.name)} モーター勝率ランキング</h2>
+      <div class="tbl" style="max-height:420px;overflow-y:auto"><table><thead><tr><th>順位</th><th>No</th><th>勝率</th><th>2連対率</th><th>3連対率</th><th>出走</th></tr></thead>
+        <tbody>${top}</tbody></table></div>
+      <div class="note">このレースで使うモーターを色付きで表示しています。</div>
+    </div>`;
+  $("mp").querySelectorAll("button").forEach((b) => b.onclick = () => { state.mp = b.dataset.p; drawMotorTab(v, race); });
 }
 
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {

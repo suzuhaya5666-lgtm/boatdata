@@ -66,11 +66,58 @@ def started(e):
     return e.get("course") is not None and not (e.get("status") or "").startswith("K")
 
 
+POINTS = {1: 10, 2: 8, 3: 6, 4: 4, 5: 2, 6: 1}
+KM_KEYS = ("逃げ", "差し", "まくり", "まくり差し", "抜き", "恵まれ")
+
+
+def bucket(recs):
+    """記録 [(日付, 場, コース, 着, 自分の決まり手, 負けた決まり手, 1コースが勝ったか)] を集計。"""
+    b = {"n": 0, "p1": 0, "p2": 0, "p3": 0, "win": {}, "lost": {}, "nigashi": 0}
+    for _, _, _, place, own, lost, c1won in recs:
+        b["n"] += 1
+        if place in (1, 2, 3):
+            b[f"p{place}"] += 1
+        if own:
+            b["win"][own] = b["win"].get(own, 0) + 1
+        if lost:
+            b["lost"][lost] = b["lost"].get(lost, 0) + 1
+        if c1won:
+            b["nigashi"] += 1
+    if not b["win"]:
+        del b["win"]
+    if not b["lost"]:
+        del b["lost"]
+    return b
+
+
+def motor_starts():
+    """番組表のモーター2連率が一斉に0に戻った日を、今のモーターの使い始めとする。"""
+    starts = {}
+    for code in VENUES:
+        prev = None
+        for p in sorted(glob.glob(os.path.join(DATA, "races", "*", "*.json"))):
+            with open(p, encoding="utf-8") as f:
+                day = json.load(f)
+            v = day["venues"].get(code)
+            if not v:
+                continue
+            m = [e["motor_2"] for r in v["races"].values() for e in r["entries"] if e.get("motor_2") is not None]
+            if not m:
+                continue
+            med = statistics.median(m)
+            if prev is not None and prev > 20 and med < 3:
+                starts[code] = day["date"]
+            prev = med
+    return starts
+
+
 def main():
     venues = {c: {"name": n, "course": {str(k): counter() for k in range(1, 7)},
                   "kimarite": {str(k): {} for k in range(1, 7)}, "race": {}}
               for c, n in VENUES.items()}
     racers = {}
+    hist = {}
+    motors = {}
     first = last = None
     nraces = 0
 
@@ -102,8 +149,24 @@ def main():
             if tri:
                 r["tri"].append((tri[0]["yen"], tri[0]["pop"]))
 
+        km = race.get("kimarite")
+        winner = next((e for e in ents if e.get("place") == 1), None)
+        c1won = winner is not None and winner["course"] == 1
+
+        # ---- モーター(対象5場)
+        if code in VENUES:
+            for e in ents:
+                if e.get("motor_no") is not None:
+                    motors.setdefault(code, {}).setdefault(e["motor_no"], []).append(
+                        (date, POINTS.get(e.get("place"), 0), e.get("place")))
+
         # ---- 選手別(全24場)
         for e in ents:
+            hist.setdefault(e["regno"], []).append((
+                date, code, e["course"], e.get("place"),
+                km if e.get("place") == 1 and km else None,
+                km if e["course"] == 1 and winner is not None and winner is not e and km else None,
+                e["course"] >= 2 and c1won))
             rr = racers.setdefault(e["regno"], {
                 "regno": e["regno"], "name": "", "course": {}, "others": {},
                 "st": {k: [] for k in ("total", "slow", "dash", "day", "night",
@@ -150,8 +213,45 @@ def main():
     with open(os.path.join(DATA, "stats", "venues.json"), "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 
+    # ---- 書き出し: モーター
+    starts = motor_starts()
+    mout = {"period": period, "venues": {}}
+    for code, ms in motors.items():
+        start = dt.date.fromisoformat(starts[code]) if code in starts else first
+        spans = {"1m": last - dt.timedelta(days=30), "3m": last - dt.timedelta(days=91),
+                 "6m": last - dt.timedelta(days=182), "all": start}
+        res = {}
+        for no, recs in ms.items():
+            res[str(no)] = {}
+            for key, since in spans.items():
+                rs = [r for r in recs if r[0] >= max(since, start)]
+                if rs:
+                    res[str(no)][key] = {"n": len(rs), "pts": sum(r[1] for r in rs),
+                                         "p1": sum(r[2] == 1 for r in rs), "p2": sum(r[2] == 2 for r in rs),
+                                         "p3": sum(r[2] == 3 for r in rs)}
+        mout["venues"][code] = {"start": start.isoformat(), "motors": res}
+    with open(os.path.join(DATA, "stats", "motors.json"), "w", encoding="utf-8") as f:
+        json.dump(mout, f, ensure_ascii=False, separators=(",", ":"))
+
     # ---- 書き出し: 選手別
+    six = last - dt.timedelta(days=182)
     for regno, rr in racers.items():
+        recs = hist.get(regno, [])
+        byc = {"10": {}, "6m": {}, "1y": {}, "local": {}}
+        for c in range(1, 7):
+            rc = [r for r in recs if r[2] == c]
+            if not rc:
+                continue
+            byc["10"][str(c)] = bucket(rc[-10:])
+            byc["1y"][str(c)] = bucket(rc)
+            r6 = [r for r in rc if r[0] >= six]
+            if r6:
+                byc["6m"][str(c)] = bucket(r6)
+            for code in VENUES:
+                rl = [r for r in rc if r[1] == code]
+                if rl:
+                    byc["local"].setdefault(code, {})[str(c)] = bucket(rl)
+        rr["bycourse"] = byc
         st = {}
         for k, vals in rr["st"].items():
             st[k] = {"n": len(vals), "avg": round(statistics.mean(vals), 3) if vals else None}
