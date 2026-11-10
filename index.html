@@ -155,6 +155,22 @@
   table.grid2 .v.sub { font-size: 13px; color: #495057; margin-top: 2px; }
   .v.pk { background: #ffc9de; } .v.ye { background: #fff3bf; }
   .red { color: #e03131; font-weight: 800; }
+  .meet { display: flex; gap: 3px; align-items: stretch; }
+  .mr { display: flex; flex-direction: column; align-items: center; min-width: 34px; font-size: 12px; line-height: 1.5; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .mh { width: 100%; text-align: center; font-weight: 800; font-size: 11px; }
+  .msep { width: 2px; background: #adb5bd; margin: 0 2px; }
+  b.p23 { color: #1971c2; }
+  td.mcell { min-width: 120px; }
+  .oh { font-size: 15px; margin: 14px 0 4px; }
+  table.odds td, table.odds th { text-align: center; font-size: 13px; padding: 4px; }
+  table.odds td.na { color: #ccd; background: #f8f9fa; }
+  .hitc { background: #b2f2bb !important; font-weight: 800; }
+  .ogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 4px; }
+  .oi { display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; font-size: 13px; }
+  .oi .mini { width: 18px; height: 18px; line-height: 18px; font-size: 11px; margin-right: 1px; }
+  .o3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 6px; }
+  .oblk { display: flex; flex-direction: column; gap: 3px; }
+  .obh { font-weight: 800; font-size: 13px; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -372,7 +388,7 @@ function drawList() {
 function drawDetail() {
   const v = state.day.venues[state.venue];
   const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
-  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示情報"], ["motor", "モーター"], ["deme", "出目確率"]];
+  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["deme", "出目確率"], ["result", "結果"]];
   state.dtab = state.dtab || "card";
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
@@ -389,6 +405,7 @@ function drawDetail() {
   if (state.dtab === "exh") return drawExhTab(v, race);
   if (state.dtab === "motor") return drawMotorTab(v, race);
   if (state.dtab === "deme") return drawDemeTab(v, race);
+  if (state.dtab === "result") return drawResultTab(v, race);
   drawCardTab(v, race);
 }
 
@@ -402,14 +419,12 @@ function rankCls(values, higher = true) {
 
 async function drawCardTab(v, race) {
   loading();
-  const files = await Promise.all(race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`)));
+  const [files, meet] = await Promise.all([
+    Promise.all(race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))), meetHistory(race)]);
   if (state.dtab !== "card") return;
-  const w = race.weather;
   const meta = [
     race.deadline ? `締切 ${race.deadline}` : "",
     race.distance ? `${race.distance}m` : "",
-    w ? `${esc(w.sky)} 風 ${esc(w.wind_dir)} ${w.wind}m 波 ${w.wave}cm` : "",
-    race.kimarite ? `決まり手 ${esc(race.kimarite)}` : "",
   ].filter(Boolean).map((s) => `<span>${s}</span>`).join("");
 
   const E = race.entries;
@@ -428,7 +443,7 @@ async function drawCardTab(v, race) {
   };
   const fst = (x) => x == null ? "-" : x.toFixed(2).replace(/^0/, "");
   const two = (a, ca, b, cb) => `<div class="v ${ca}">${a}</div><div class="v sub ${cb}">${b}</div>`;
-  const hasResult = E.some((e) => e.place != null || e.status);
+  const hasResult = false;  // 結果は「結果」タブへ
 
   const rows = E.map((e, i) => {
     const s = sh[i];
@@ -444,6 +459,7 @@ async function drawCardTab(v, race) {
       <td>${two(fmt(e.loc_win), col.locWin[i], `${fmt(e.loc_2, 1)}%`, col.loc2[i])}</td>
       <td>${two(`<small>No.</small>${e.motor_no ?? "-"}`, "", `${fmt(e.motor_2, 1)}%`, col.motor2[i])}</td>
       <td>${two(`<small>No.</small>${e.boat_no ?? "-"}`, "", `${fmt(e.boat_2, 1)}%`, col.boat2[i])}</td>
+      <td class="mcell">${meetCell(meet[e.regno])}</td>
       ${hasResult ? `<td>${two(e.exh != null ? fmt(e.exh) : "-", col.exh[i], `進入 ${e.course ?? "-"}`, "")}</td>
       <td>${two(esc(e.st ?? "-"), col.st[i], `<b class="${e.place === 1 ? "p1" : ""}">${e.place ? e.place + "着" : esc(statusText(e.status) || "-")}</b>`, "")}</td>` : ""}
     </tr>`;
@@ -465,13 +481,125 @@ async function drawCardTab(v, race) {
       <div class="tbl"><table class="grid2">
         <thead><tr><th>枠</th><th>選手</th><th>平均ST<br><small>コース別</small></th><th>F<br>L</th>
           <th>全国勝率<br><small>2連率</small></th><th>当地勝率<br><small>2連率</small></th>
-          <th>モーター<br><small>2連率</small></th><th>ボート<br><small>2連率</small></th>
+          <th>モーター<br><small>2連率</small></th><th>ボート<br><small>2連率</small></th><th>今節成績<br><small>R・進入・ST・着</small></th>
           ${hasResult ? "<th>展示<br><small>進入</small></th><th>ST<br><small>着順</small></th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。F・Lは直近1年の回数。</div>
+      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。F・Lは直近1年の回数。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
     </div>
-    ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}`;
+`;
+}
+
+// ---------------------------------------------------------------- 今節成績
+// この節(同じ場・同じ開催名)のこれまでのレースから、選手ごとの成績を集める
+async function meetHistory(race) {
+  const v = state.day.venues[state.venue];
+  const out = {};
+  const [y, m, d] = state.date.split("-").map(Number);
+  for (let back = 0; back < 9; back++) {
+    const dt = new Date(Date.UTC(y, m - 1, d - back));
+    const ds = dt.toISOString().slice(0, 10);
+    const day = back === 0 ? state.day : await cached(`data/races/${ds.slice(0, 4)}/${ds.replace(/-/g, "")}.json`);
+    const vv = day?.venues?.[state.venue];
+    if (!vv || (v.title && vv.title !== v.title)) { if (back > 0) break; else continue; }
+    Object.values(vv.races).forEach((r) => {
+      if (back === 0 && r.no >= race.no) return;
+      r.entries.forEach((e) => {
+        if (e.place == null && !e.status) return;  // 結果が出ていない
+        (out[e.regno] = out[e.regno] || []).push({ date: ds, dayNo: vv.day, final: vv.final, no: r.no, boat: e.boat,
+          course: e.course, st: e.st, place: e.place, status: e.status });
+      });
+    });
+  }
+  Object.values(out).forEach((a) => a.sort((p, q) => p.date.localeCompare(q.date) || p.no - q.no));
+  return out;
+}
+function meetCell(list) {
+  if (!list?.length) return '<span class="cnt">-</span>';
+  let html = "", lastDate = "";
+  list.forEach((h) => {
+    if (h.date !== lastDate && lastDate) html += '<span class="msep"></span>';
+    lastDate = h.date;
+    const pl = h.place ? h.place : statusText(h.status);
+    html += `<span class="mr"><span class="mh k${h.boat}">${h.no}R</span><span>${h.course ?? "-"}</span>
+      <span class="cnt">${esc((h.st || "").replace(/^0/, ""))}</span><b class="${h.place === 1 ? "p1" : h.place && h.place <= 3 ? "p23" : ""}">${esc(pl)}</b></span>`;
+  });
+  return `<div class="meet">${html}</div>`;
+}
+
+// ---------------------------------------------------------------- 結果
+async function getOdds(hd, venue, no) {
+  const path = `data/odds/${hd}/${venue}_${String(no).padStart(2, "0")}.json`;
+  try {
+    const r = await fetch(RAW + path, { cache: "no-store" });
+    if (r.ok) return await r.json();
+  } catch (e) { /* なし */ }
+  return getJSON(path).catch(() => null);
+}
+
+async function drawResultTab(v, race) {
+  loading();
+  const done = race.entries.some((e) => e.place != null || e.status);
+  if (!done) {
+    $("view-race").innerHTML = '<div class="empty">結果はまだです。結果は夜（23:37・1:07）と朝の取り込みで入ります。</div>';
+    return;
+  }
+  const od = await getOdds(state.date.replace(/-/g, ""), state.venue, race.no);
+  if (state.dtab !== "result") return;
+  const res = [1, 2, 3].map((p) => race.entries.find((e) => e.place === p)?.boat);
+  const order = [...race.entries].sort((a, b) => (a.place ?? 9) - (b.place ?? 9));
+  const w = race.weather;
+  const rows = order.map((e) => `<tr>
+      <td><b class="${e.place === 1 ? "p1" : ""}">${e.place ? e.place + "着" : esc(statusText(e.status) || "-")}</b></td>
+      <td class="lk k${e.boat}">${e.boat}</td>
+      <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>${e.class ? ` <span class="cls ${e.class}">${e.class}</span>` : ""}</td>
+      <td>${e.course ?? "-"}</td><td>${esc(e.st ?? "-")}</td><td>${e.exh != null ? fmt(e.exh) : "-"}</td><td>${esc(e.time ?? "-")}</td></tr>`).join("");
+
+  let pay = "";
+  if (race.payouts && Object.keys(race.payouts).length) {
+    pay = '<div class="pay">' + BETS.filter((b) => race.payouts[b]).map((b) =>
+      race.payouts[b].map((p, i) => `
+        <span class="k">${i === 0 ? b : ""}</span><span>${p.combo}</span>
+        <span class="y">${p.yen.toLocaleString()}円</span><span class="pp">${p.pop ? p.pop + "番人気" : ""}</span>`
+      ).join("")).join("") + "</div>";
+  }
+
+  // オッズ表
+  const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  const oc = (val, hit) => `<td class="${hit ? "hitc" : ""}">${val == null ? "-" : val.toFixed(1)}</td>`;
+  let oddsHtml = '<div class="note">この レースのオッズはまだ取り込んでいません（結果のあとに取り込みます）。</div>';
+  if (od) {
+    const B = [1, 2, 3, 4, 5, 6];
+    const t2 = `<table class="grid2 odds"><thead><tr><th>2着＼1着</th>${B.map((a) => `<th>${bb(a)}</th>`).join("")}</tr></thead><tbody>
+      ${B.map((b) => `<tr><th>${bb(b)}</th>${B.map((a) => a === b ? '<td class="na">—</td>' : oc(od["2t"]?.[`${a}-${b}`], res[0] === a && res[1] === b)).join("")}</tr>`).join("")}</tbody></table>`;
+    const f2 = `<table class="grid2 odds"><thead><tr><th></th>${B.slice(1).map((b) => `<th>${bb(b)}</th>`).join("")}</tr></thead><tbody>
+      ${B.slice(0, 5).map((a) => `<tr><th>${bb(a)}</th>${B.slice(1).map((b) => b <= a ? '<td class="na"></td>' : oc(od["2f"]?.[`${a}=${b}`], [res[0], res[1]].sort().join() === [a, b].join())).join("")}</tr>`).join("")}</tbody></table>`;
+    const trioKeys = Object.keys(od["3f"] || {}).sort();
+    const resTrio = [...res].sort().join("=");
+    const f3 = `<div class="ogrid">${trioKeys.map((k) => `<div class="oi ${k === resTrio ? "hitc" : ""}"><span>${k.split("=").map(Number).map(bb).join("")}</span><b>${od["3f"][k].toFixed(1)}</b></div>`).join("")}</div>`;
+    const t3 = B.map((a) => `<div class="oblk"><div class="obh">${bb(a)} 1着</div>${B.filter((b) => b !== a).map((b) =>
+      B.filter((c) => c !== a && c !== b).map((c) => {
+        const k = `${a}-${b}-${c}`, val = od["3t"]?.[k];
+        return `<div class="oi ${res.join("-") === k ? "hitc" : ""}"><span>${bb(b)}${bb(c)}</span><b>${val == null ? "-" : val.toFixed(1)}</b></div>`;
+      }).join("")).join("")}</div>`).join("");
+    oddsHtml = `
+      <h3 class="oh">2連単</h3><div class="tbl">${t2}</div>
+      <h3 class="oh">2連複</h3><div class="tbl">${f2}</div>
+      <h3 class="oh">3連複</h3>${f3}
+      <h3 class="oh">3連単</h3><div class="o3">${t3}</div>
+      <div class="note">締切時オッズ。当たった目を緑にしています。</div>`;
+  }
+
+  $("view-race").innerHTML = `
+    <div class="card">
+      <h2>${esc(v.name)} ${race.no}R 結果</h2>
+      <div class="meta">${w ? `<span>${esc(w.sky)} 風 ${esc(w.wind_dir)} ${w.wind}m 波 ${w.wave}cm</span>` : ""}
+        ${race.kimarite ? `<span>決まり手 <b>${esc(race.kimarite)}</b></span>` : ""}</div>
+      <div class="tbl"><table class="grid2"><thead><tr><th>着</th><th>枠</th><th>選手</th><th>進入</th><th>ST</th><th>展示</th><th>タイム</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </div>
+    ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}
+    <div class="card"><h2>オッズ</h2>${oddsHtml}</div>`;
 }
 
 // ---------------------------------------------------------------- 共通

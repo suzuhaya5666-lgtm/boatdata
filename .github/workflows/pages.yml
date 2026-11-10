@@ -41,6 +41,7 @@ jobs:
           cp data/index.json _site/data/
           cp -r data/races data/stats data/model _site/data/
           [ -d data/before ] && cp -r data/before _site/data/ || true
+          [ -d data/odds ] && cp -r data/odds _site/data/ || true
 
       - uses: actions/upload-pages-artifact@v3
         with:

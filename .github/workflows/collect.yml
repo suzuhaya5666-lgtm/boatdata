@@ -52,6 +52,9 @@ jobs:
         run: |
           python scripts/collect.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" ${{ inputs.reparse && '--reparse' || '' }}
 
+      - name: 締切時オッズ(前日と今日の終わったレース)
+        run: python -u scripts/odds.py --max-minutes 25
+
       - name: 出目確率の重み(月1回)
         run: |
           pip install --quiet numpy scipy
