@@ -74,6 +74,46 @@ def parse_three(tbody, ordered):
     return out
 
 
+def rng(s):
+    """'1.3-1.8' → [1.3, 1.8]"""
+    m = re.match(r"^([\d.]+)-([\d.]+)$", s.strip())
+    return [float(m.group(1)), float(m.group(2))] if m else None
+
+
+def parse_wide(tbody):
+    """拡連複(2連複と同じ並び、値は幅)"""
+    out = {}
+    for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", tbody, re.S):
+        cs = cells(tr)
+        for col in range(6):
+            if 2 * col + 1 >= len(cs):
+                break
+            second, val = cs[2 * col][1], rng(cs[2 * col + 1][1])
+            if val is None or not second.isdigit():
+                continue
+            out["=".join(map(str, sorted((col + 1, int(second)))))] = val
+    return out
+
+
+def parse_tf(html):
+    """単勝・複勝: 表が2つ(単勝・複勝)、各行 [艇, 名前, オッズ]"""
+    win, place = {}, {}
+    for tb in re.findall(r"<tbody[^>]*>(.*?)</tbody>", html, re.S):
+        cs = cells(tb)
+        if len(cs) < 3 or not cs[0][1].isdigit():
+            continue
+        b, v = cs[0][1], cs[2][1]
+        if "-" in v:
+            r = rng(v)
+            if r and r[1] > 0:
+                place[b] = r
+        else:
+            x = num(v)
+            if x:
+                win[b] = x
+    return win, place
+
+
 def fetch(page, rno, jcd, hd):
     """curl で取る(Python の urllib だと GitHub の実行環境で毎回8秒ほど待たされるため)"""
     t = time.time()
@@ -88,6 +128,24 @@ def fetch(page, rno, jcd, hd):
 
 
 VERBOSE = "--verbose" in sys.argv
+
+
+def get_race_full(rno, jcd, hd, pool=None):
+    """5ページ(2連単・2連複/3連単/3連複/単勝・複勝/拡連複)をまとめて取る。データがなければ None"""
+    pages = ["odds2tf", "odds3t", "odds3f", "oddstf", "oddsk"]
+    if pool:
+        htmls = dict(zip(pages, pool.map(lambda pg: fetch(pg, rno, jcd, hd), pages)))
+    else:
+        htmls = {pg: fetch(pg, rno, jcd, hd) for pg in pages}
+    if "データがありません" in htmls["odds2tf"] or not tables(htmls["odds2tf"]):
+        return None
+    t2 = tables(htmls["odds2tf"])
+    win, place = parse_tf(htmls["oddstf"])
+    tk = tables(htmls["oddsk"])
+    return {"2t": parse_two(t2[0], True), "2f": parse_two(t2[1], False) if len(t2) > 1 else {},
+            "3t": parse_three(tables(htmls["odds3t"])[0], True) if tables(htmls["odds3t"]) else {},
+            "3f": parse_three(tables(htmls["odds3f"])[0], False) if tables(htmls["odds3f"]) else {},
+            "1t": win, "1f": place, "k": parse_wide(tk[0]) if tk else {}}
 
 
 def get_race(rno, jcd, hd):

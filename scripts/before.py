@@ -18,6 +18,47 @@ from collect import DATA, JST, VENUES  # noqa: E402
 URL = "https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={hd}"
 # 締切の何分前から何分後まで取りに行くか(GitHub の定期実行は遅れることがあるので広めに)
 BEFORE_MIN, AFTER_MIN = 45, 20
+# オッズは締切20分前から締切まで、毎回取り直す
+ODDS_BEFORE_MIN = 20
+
+
+def fetch_live_odds(day, now):
+    """締切20分前〜締切のレースのオッズを取り、data/live/<日付>/<場>_<R>.json に保存する。"""
+    from concurrent.futures import ThreadPoolExecutor
+    from odds import get_race_full
+    targets = []
+    for code, v in day["venues"].items():
+        for no, race in v["races"].items():
+            if not race.get("deadline"):
+                continue
+            hh, mm = map(int, race["deadline"].split(":"))
+            dl = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if dl - dt.timedelta(minutes=ODDS_BEFORE_MIN) <= now <= dl + dt.timedelta(minutes=2):
+                targets.append((code, int(no)))
+    if not targets:
+        return 0
+    outdir = os.path.join(DATA, "live", f"{now:%Y%m%d}")
+
+    def one(t):
+        code, no = t
+        try:
+            o = get_race_full(no, code, f"{now:%Y%m%d}")
+        except Exception as e:
+            return f"{VENUES[code]}{no}R オッズ失敗 {e}"
+        if not o or not o["3t"]:
+            return f"{VENUES[code]}{no}R オッズまだ"
+        o["time"] = dt.datetime.now(JST).strftime("%H:%M")
+        os.makedirs(outdir, exist_ok=True)
+        with open(os.path.join(outdir, f"{code}_{no:02d}.json"), "w", encoding="utf-8") as f:
+            json.dump(o, f, separators=(",", ":"))
+        return None
+
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        for msg in ex.map(one, targets):
+            if msg:
+                print(msg)
+    print(f"{now:%H:%M} オッズ {len(targets)}レース")
+    return len(targets)
 
 
 def text(s):
@@ -123,6 +164,10 @@ def fetch_once():
             got += 1
             print(f"{VENUES[code]}{no}R: 保存" + ("" if info["complete"] else "(途中)"))
     print(f"{now:%H:%M} 直前情報 {got}件")
+    try:
+        fetch_live_odds(day, now)
+    except Exception as e:  # オッズが失敗しても直前情報は続ける
+        print(f"オッズ失敗 {e}")
     return got, remaining
 
 
@@ -130,7 +175,10 @@ def push():
     """取れた分をすぐ GitHub に保存する(画面はリポジトリから直接読む)。"""
     def run(*a):
         return subprocess.run(list(a), capture_output=True, text=True)
-    run("git", "add", os.path.join(DATA, "before"))
+    paths = [p for p in (os.path.join(DATA, "before"), os.path.join(DATA, "live")) if os.path.exists(p)]
+    if not paths:
+        return
+    run("git", "add", *paths)
     if run("git", "diff", "--cached", "--quiet").returncode == 0:
         return
     run("git", "commit", "-m", f"直前情報 {dt.datetime.now(JST):%Y-%m-%d %H:%M}")
@@ -150,6 +198,7 @@ def main():
     limit = float(sys.argv[sys.argv.index("--loop") + 1])
     start = time.time()
     while True:
+        t_cycle = time.time()
         try:
             _, remaining = fetch_once()
             push()
@@ -162,7 +211,7 @@ def main():
         if time.time() - start > limit * 60:
             print("時間になったので終了(次の実行に引き継ぎ)")
             break
-        time.sleep(300)
+        time.sleep(max(30, 300 - (time.time() - t_cycle)))  # 5分ごと(取得にかかった時間を差し引く)
 
 
 

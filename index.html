@@ -188,6 +188,33 @@
   table.paytbl td.combo { text-align: left; }
   table.paytbl td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
   .sepc { margin: 0 2px; color: var(--sub); }
+  /* ---- オッズタブ */
+  .otypes { background: #eef2f7; border-radius: 10px; padding: 3px; display: inline-flex; gap: 2px; flex-wrap: wrap; }
+  .otypes button { border: 0; background: none; color: var(--sub); font-weight: 700; padding: 7px 12px; border-radius: 8px; }
+  .otypes button.on { background: var(--ink); color: #fff; }
+  .orow { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+  .otime { color: var(--sub); font-size: 13px; }
+  .otag { border: 1.5px solid #e03131; color: #e03131; font-weight: 700; padding: 3px 8px; border-radius: 4px; font-size: 13px; }
+  table.otbl { border-collapse: collapse; width: 100%; font-size: 14px; }
+  table.otbl th, table.otbl td { border: 1px solid var(--line); padding: 5px 4px; text-align: center; }
+  table.otbl th { font-weight: 800; font-size: 13px; }
+  table.otbl td.oc { text-align: right; padding-right: 8px; font-variant-numeric: tabular-nums; cursor: pointer; min-width: 52px; }
+  table.otbl td.ob2, table.otbl td.ob3 { font-weight: 800; width: 26px; }
+  table.otbl td.na { background: #f8f9fa; }
+  table.otbl .osel, table.otbl tr.osel td { background: #dbe7ff !important; }
+  table.t3 { font-size: 13px; }
+  table.otbl.rank tr.oc { cursor: pointer; }
+  table.otbl.form .chk, .chk2 { width: 38px; height: 38px; border-radius: 50%; border: 1.5px solid #ced4da; background: #fff; color: #adb5bd; font-weight: 800; padding: 0; }
+  table.otbl.form .chk.on { background: #1971c2; border-color: #1971c2; color: #fff; }
+  .chk2 { border-radius: 8px; width: auto; min-width: 38px; height: 34px; color: var(--ink); }
+  .memofab { position: fixed; right: 18px; bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 8; width: 74px; height: 74px; border-radius: 50%;
+    background: #1971c2; color: #fff; border: 0; box-shadow: 0 4px 12px rgba(0,0,0,.25); display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 20px; }
+  .memofab span { font-size: 10px; font-weight: 700; }
+  .memofab b { position: absolute; top: -4px; right: -4px; background: #e64980; color: #fff; border-radius: 50%; width: 24px; height: 24px; line-height: 24px; font-size: 13px; }
+  input.amt { width: 56px; font-size: 16px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
+  #mmode { font-size: 15px; padding: 6px; border-radius: 6px; border: 1px solid var(--line); }
+  table.memo td.payc { text-align: right; }
+  .plus { color: #2b8a3e; font-weight: 700; } .minus { color: #e03131; font-weight: 700; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -405,7 +432,7 @@ function drawList() {
 function drawDetail() {
   const v = state.day.venues[state.venue];
   const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
-  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["deme", "出目確率"], ["result", "結果"]];
+  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["odds", "オッズ"], ["deme", "出目確率"], ["result", "結果"]];
   state.dtab = state.dtab || "card";
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
@@ -423,6 +450,7 @@ function drawDetail() {
   if (state.dtab === "motor") return drawMotorTab(v, race);
   if (state.dtab === "deme") return drawDemeTab(v, race);
   if (state.dtab === "result") return drawResultTab(v, race);
+  if (state.dtab === "odds") return drawOddsTab(v, race);
   drawCardTab(v, race);
 }
 
@@ -633,6 +661,283 @@ async function drawResultTab(v, race) {
     </div>
     ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}
     <div class="card"><h2>オッズ</h2>${oddsHtml}</div>`;
+}
+
+// ---------------------------------------------------------------- オッズタブ
+// 種類: 3t=3連単 3f=3連複 2t=2連単 2f=2連複 k=拡連複 1t=単勝 1f=複勝
+const OTYPES = [["3t", "3連単"], ["3f", "3連複"], ["2tf", "2連単・2連複"], ["k", "拡連複"], ["tf", "単勝・複勝"]];
+const ONAME = { "3t": "3連単", "3f": "3連複", "2t": "2連単", "2f": "2連複", k: "拡連複", "1t": "単勝", "1f": "複勝" };
+const DEME_KEY = { "3t": "3連単", "3f": "3連複", "2t": "2連単", "2f": "2連複", k: "拡連複", "1t": "単勝", "1f": "複勝" };
+const ORDERED = { "3t": true, "2t": true };
+
+// 最新のオッズ: GitHub の API から直接(サイトの公開を待たない)。なければ締切時オッズ
+async function getLive(hd, venue, no) {
+  const path = `data/live/${hd}/${venue}_${String(no).padStart(2, "0")}.json`;
+  try {
+    const r = await fetch(`https://api.github.com/repos/suzuhaya5666-lgtm/boatdata/contents/${path}?ref=main`,
+      { headers: { Accept: "application/vnd.github.raw" }, cache: "no-store" });
+    if (r.ok) return await r.json();
+  } catch (e) { /* 次へ */ }
+  try {
+    const r = await fetch(RAW + path, { cache: "no-store" });
+    if (r.ok) return await r.json();
+  } catch (e) { /* 次へ */ }
+  return getJSON(path).catch(() => null);
+}
+const oval = (od, t, k) => od?.[t]?.[k];
+const olo = (v) => Array.isArray(v) ? v[0] : v;  // 幅のあるオッズは下限で計算
+const ofmt = (v) => v == null ? "-" : Array.isArray(v) ? `${v[0].toFixed(1)}-${v[1].toFixed(1)}` : v.toFixed(1);
+const keyOf = (t, boats) => ORDERED[t] ? boats.join("-") : [...boats].sort().join("=");
+const demeKey = (t, k) => k.replace(/=/g, "-");
+
+// 買い目メモ(レースごとに端末に保存)
+function memoKey() { return `memo_${state.date}_${state.venue}_${state.race}`; }
+function memoLoad() { try { return JSON.parse(localStorage.getItem(memoKey()) || "[]"); } catch (e) { return []; } }
+function memoSave(list) { try { localStorage.setItem(memoKey(), JSON.stringify(list)); } catch (e) { /* 保存できない環境 */ } }
+function memoHas(t, k) { return memoLoad().some((m) => m.t === t && m.k === k); }
+function memoToggle(t, k, on) {
+  let list = memoLoad();
+  const has = list.some((m) => m.t === t && m.k === k);
+  if (on === undefined) on = !has;
+  if (on && !has) list.push({ t, k, amt: 100 });
+  if (!on) list = list.filter((m) => !(m.t === t && m.k === k));
+  memoSave(list);
+}
+
+async function drawOddsTab(v, race, force) {
+  if (!force) loading();
+  const hd = state.date.replace(/-/g, "");
+  const [live, fin, dm] = await Promise.all([getLive(hd, state.venue, race.no), getOdds(hd, state.venue, race.no), computeDeme(race)]);
+  if (state.dtab !== "odds") return;
+  const finished = race.entries.some((e) => e.place != null || e.status);
+  // 終わったレースは締切時オッズを優先(単勝・複勝・拡連複は最後に取れた分)
+  const od = finished && fin ? { ...(live || {}), ...fin, time: null } : (live || fin);
+  state.otype = state.otype || "3t";
+  state.oview = state.oview || "normal";
+  const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
+  const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  const done = race.entries.some((e) => e.place != null || e.status);
+
+  // 状態の表示
+  let status;
+  if (od) {
+    status = od.time ? `<span class="otime">オッズ更新 ${esc(od.time)}（5分ごとに取り込み）</span>` : '<span class="otag">締切時オッズ</span>';
+  }
+  let minsLeft = null;
+  if (state.date === nowJST().date && race.deadline) {
+    const [h, m] = race.deadline.split(":").map(Number);
+    const [nh, nm] = nowJST().time.split(":").map(Number);
+    minsLeft = (h * 60 + m) - (nh * 60 + nm);
+  }
+  const head = `
+    <div class="seg otypes">${OTYPES.map(([k, l]) => `<button class="${k === state.otype ? "on" : ""}" data-ot="${k}">${l}</button>`).join("")}</div>
+    <div class="seg">${[["normal", "通常"], ["pop", "人気順"], ["high", "高配当順"], ["form", "フォーメーション"]].map(([k, l]) =>
+      `<button class="pill2 ${k === state.oview ? "on" : ""}" data-ov="${k}">${l}</button>`).join("")}</div>
+    <div class="orow">${status || ""}<button class="pill2" id="oreload">⟳ オッズ取得</button></div>`;
+
+  if (!od) {
+    const when = minsLeft != null && minsLeft > 20 ? `締切20分前（あと${minsLeft - 20}分）から` : "締切20分前から";
+    $("view-race").innerHTML = `<div class="card">${head}
+      <div class="empty">まだオッズがありません。<br>${when}5分ごとに取り込みます。<br>「オッズ取得」で最新を読み込みます。</div></div>`;
+    bindOdds(v, race);
+    return;
+  }
+
+  // 確率と期待値
+  const prob = (t, k) => dm?.prob?.[DEME_KEY[t]]?.[demeKey(t, k)] ?? null;
+  const evCell = (t, k, val) => {
+    const p = prob(t, k);
+    if (p == null || val == null) return "<td>-</td><td>-</td>";
+    const ev = p * olo(val);
+    return `<td>${(p * 100).toFixed(1)}%</td><td class="${ev >= 1 ? "val" : ""}">${ev.toFixed(2)}</td>`;
+  };
+  const sel = (t, k) => memoHas(t, k) ? "osel" : "";
+  const cell = (t, k, extra = "") => {
+    const val = oval(od, t, k);
+    return `<td class="oc ${sel(t, k)} ${extra}" data-t="${t}" data-k="${k}">${ofmt(val)}</td>`;
+  };
+  const B = [1, 2, 3, 4, 5, 6];
+  const headBoats = B.map((b) => `<th class="k${b}">${b}.${esc(ents[b]?.name || "")}</th>`).join("");
+  let body = "";
+  const types = state.otype === "2tf" ? ["2t", "2f"] : state.otype === "tf" ? ["1t", "1f"] : [state.otype];
+
+  if (state.oview === "normal") {
+    if (state.otype === "3t") {
+      // 1着ごとの列。2着(4行まとめて)・3着・オッズ
+      const rows = [];
+      for (let r = 0; r < 20; r++) {
+        rows.push("<tr>" + B.map((a) => {
+          const seconds = B.filter((x) => x !== a);
+          const sIdx = Math.floor(r / 4), b = seconds[sIdx];
+          const thirds = B.filter((x) => x !== a && x !== b), c = thirds[r % 4];
+          return `${r % 4 === 0 ? `<td rowspan="4" class="k${b} ob2">${b}</td>` : ""}<td class="k${c} ob3">${c}</td>${cell("3t", `${a}-${b}-${c}`)}`;
+        }).join("") + "</tr>");
+      }
+      body = `<div class="tbl"><table class="otbl t3"><thead><tr>${B.map((b) => `<th colspan="3" class="k${b}">${b}.${esc(ents[b]?.name || "")}</th>`).join("")}</tr></thead><tbody>${rows.join("")}</tbody></table></div>`;
+    } else if (state.otype === "3f") {
+      const keys = Object.keys(od["3f"] || {}).sort();
+      body = `<div class="tbl"><table class="otbl"><thead><tr><th>組番</th><th>オッズ</th><th>組番</th><th>オッズ</th></tr></thead><tbody>${
+        Array.from({ length: Math.ceil(keys.length / 2) }, (_, i) => [keys[i], keys[i + Math.ceil(keys.length / 2)]]).map((pair) =>
+          "<tr>" + pair.map((k) => k ? `<td>${k.split("=").map(Number).map(bb).join("=")}</td>${cell("3f", k)}` : "<td></td><td></td>").join("") + "</tr>").join("")}</tbody></table></div>`;
+    } else if (state.otype === "2tf") {
+      const t2 = `<h3 class="oh">2連単</h3><div class="tbl"><table class="otbl"><thead><tr>${B.map((b) => `<th colspan="2" class="k${b}">${b}.${esc(ents[b]?.name || "")}</th>`).join("")}</tr></thead><tbody>${
+        [0, 1, 2, 3, 4].map((r) => "<tr>" + B.map((a) => { const b = B.filter((x) => x !== a)[r]; return `<td class="k${b} ob3">${b}</td>${cell("2t", `${a}-${b}`)}`; }).join("") + "</tr>").join("")}</tbody></table></div>`;
+      const f2 = `<h3 class="oh">2連複</h3><div class="tbl"><table class="otbl"><thead><tr><th></th>${B.slice(1).map((b) => `<th class="k${b}">${b}</th>`).join("")}</tr></thead><tbody>${
+        B.slice(0, 5).map((a) => `<tr><th class="k${a}">${a}</th>${B.slice(1).map((b) => b <= a ? '<td class="na"></td>' : cell("2f", `${a}=${b}`)).join("")}</tr>`).join("")}</tbody></table></div>`;
+      body = t2 + f2;
+    } else if (state.otype === "k") {
+      body = `<div class="tbl"><table class="otbl"><thead><tr><th></th>${B.slice(1).map((b) => `<th class="k${b}">${b}</th>`).join("")}</tr></thead><tbody>${
+        B.slice(0, 5).map((a) => `<tr><th class="k${a}">${a}</th>${B.slice(1).map((b) => b <= a ? '<td class="na"></td>' : cell("k", `${a}=${b}`)).join("")}</tr>`).join("")}</tbody></table></div>
+        ${od.k ? "" : '<div class="note">拡連複のオッズは、締切20分前からの取り込み分にだけあります。</div>'}`;
+    } else {
+      body = `<div class="tbl"><table class="otbl"><thead><tr><th>枠</th><th>選手</th><th>単勝</th><th>複勝</th></tr></thead><tbody>${
+        B.map((b) => `<tr><td class="k${b} ob3">${b}</td><td class="name">${esc(ents[b]?.name || "")}</td>${cell("1t", `${b}`)}${cell("1f", `${b}`)}</tr>`).join("")}</tbody></table></div>
+        ${od["1t"] ? "" : '<div class="note">単勝・複勝のオッズは、締切20分前からの取り込み分にだけあります。</div>'}`;
+    }
+    body += '<div class="note">オッズをタップすると買い目メモに入ります（もう一度タップで外れます）。</div>';
+  } else if (state.oview === "pop" || state.oview === "high") {
+    body = types.map((t) => {
+      const list = Object.entries(od[t] || {}).filter(([, val]) => olo(val) > 0)
+        .sort((x, y) => state.oview === "pop" ? olo(x[1]) - olo(y[1]) : olo(y[1]) - olo(x[1]));
+      return `${types.length > 1 ? `<h3 class="oh">${ONAME[t]}</h3>` : ""}<div class="tbl"><table class="otbl rank"><thead><tr><th>順位</th><th>組番</th><th>オッズ</th><th>出目確率</th><th>期待値</th></tr></thead><tbody>${
+        list.map(([k, val], i) => `<tr class="${sel(t, k)}"><td>${i + 1}位</td><td>${k.split(/[-=]/).map(Number).map(bb).join(ORDERED[t] ? "-" : "=")}</td>${cell(t, k)}${evCell(t, k, val)}</tr>`).join("")}</tbody></table></div>`;
+    }).join("") + '<div class="note">期待値＝出目確率×オッズ。1以上（緑）は、確率のわりにオッズが高い目です。</div>';
+  } else {
+    body = drawFormation(od, ents, types);
+  }
+
+  const memo = memoLoad();
+  $("view-race").innerHTML = `<div class="card">${head}${body}</div>
+    <button class="memofab" id="memofab">📝<span>買い目メモ</span>${memo.length ? `<b>${memo.length}</b>` : ""}</button>`;
+  bindOdds(v, race, od);
+}
+
+// フォーメーション: 着ごとに艇を選ぶと組番が並ぶ
+function drawFormation(od, ents, types) {
+  const t = types.includes(state.formType) ? state.formType : types[0];
+  state.form = state.form || {};
+  const f = state.form[t] = state.form[t] || { 1: [], 2: [], 3: [] };
+  const cols = { "3t": [1, 2, 3], "2t": [1, 2], "3f": [1], "2f": [1], k: [1], "1t": [1], "1f": [1] }[t];
+  const colName = cols.length > 1 ? cols.map((c) => `${c}着`) : ["選ぶ艇"];
+  const B = [1, 2, 3, 4, 5, 6];
+  const rows = B.map((b) => `<tr><td class="lk k${b}">${b}</td><td class="name">${esc(ents[b]?.name || "")}</td>${cols.map((c) =>
+    `<td><button class="chk ${f[c].includes(b) ? "on" : ""}" data-fc="${c}" data-fb="${b}">✓</button></td>`).join("")}</tr>`).join("");
+  const ctrl = `<tr><td></td><td class="name">すべて選択</td>${cols.map((c) => `<td><button class="chk2" data-fall="${c}">全</button></td>`).join("")}</tr>
+    <tr><td></td><td class="name">すべて削除</td>${cols.map((c) => `<td><button class="chk2" data-fclr="${c}">削</button></td>`).join("")}</tr>`;
+  // 組番を作る
+  let combos = [];
+  if (t === "3t") f[1].forEach((a) => f[2].forEach((b) => f[3].forEach((c) => { if (a !== b && b !== c && a !== c) combos.push(`${a}-${b}-${c}`); })));
+  else if (t === "2t") f[1].forEach((a) => f[2].forEach((b) => { if (a !== b) combos.push(`${a}-${b}`); }));
+  else if (t === "3f") { const s = [...f[1]].sort(); for (let i = 0; i < s.length; i++) for (let j = i + 1; j < s.length; j++) for (let k = j + 1; k < s.length; k++) combos.push(`${s[i]}=${s[j]}=${s[k]}`); }
+  else if (t === "2f" || t === "k") { const s = [...f[1]].sort(); for (let i = 0; i < s.length; i++) for (let j = i + 1; j < s.length; j++) combos.push(`${s[i]}=${s[j]}`); }
+  else combos = [...f[1]].sort().map(String);
+  state.formCombos = { t, combos };
+  const allIn = combos.length && combos.every((k) => memoHas(t, k));
+  const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  const list = combos.map((k) => `<tr class="oc ${memoHas(t, k) ? "osel" : ""}" data-t="${t}" data-k="${k}"><td>${k.split(/[-=]/).map(Number).map(bb).join(ORDERED[t] ? "-" : "=")}</td><td>${ofmt(od?.[t]?.[k])}</td></tr>`).join("");
+  return `${types.length > 1 ? `<div class="seg">${types.map((x) => `<button class="pill2 ${x === t ? "on" : ""}" data-ft="${x}">${ONAME[x]}</button>`).join("")}</div>` : ""}
+    <div class="tbl"><table class="otbl form"><thead><tr><th>枠</th><th>選手</th>${colName.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${rows}${ctrl}</tbody></table></div>
+    <div class="orow"><h3 class="oh">組番一覧（${combos.length}点）</h3>
+      ${combos.length ? `<button class="pill2" id="formAll">${allIn ? "✓ " + combos.length + "点すべての買い目を削除" : "○ " + combos.length + "点すべての買い目を選択"}</button>` : ""}</div>
+    <div class="tbl"><table class="otbl rank"><thead><tr><th>組番</th><th>オッズ</th></tr></thead><tbody>${list || '<tr><td colspan="2" class="cnt">艇を選ぶと組番が出ます</td></tr>'}</tbody></table></div>`;
+}
+
+function bindOdds(v, race, od) {
+  const redraw = () => drawOddsTab(v, race, true);
+  document.querySelectorAll("[data-ot]").forEach((b) => b.onclick = () => { state.otype = b.dataset.ot; redraw(); });
+  document.querySelectorAll("[data-ov]").forEach((b) => b.onclick = () => { state.oview = b.dataset.ov; redraw(); });
+  const rl = $("oreload"); if (rl) rl.onclick = () => { rl.textContent = "読み込み中…"; redraw(); };
+  document.querySelectorAll(".oc[data-k]").forEach((c) => c.onclick = () => {
+    if (!od?.[c.dataset.t]?.[c.dataset.k] && c.tagName === "TD") return;
+    memoToggle(c.dataset.t, c.dataset.k); redraw();
+  });
+  document.querySelectorAll("[data-ft]").forEach((b) => b.onclick = () => { state.formType = b.dataset.ft; redraw(); });
+  const t = state.formCombos?.t;
+  const f = t && state.form?.[t];
+  document.querySelectorAll("[data-fc]").forEach((b) => b.onclick = () => {
+    const c = b.dataset.fc, n = Number(b.dataset.fb);
+    f[c] = f[c].includes(n) ? f[c].filter((x) => x !== n) : [...f[c], n]; redraw();
+  });
+  document.querySelectorAll("[data-fall]").forEach((b) => b.onclick = () => { f[b.dataset.fall] = [1, 2, 3, 4, 5, 6]; redraw(); });
+  document.querySelectorAll("[data-fclr]").forEach((b) => b.onclick = () => { f[b.dataset.fclr] = []; redraw(); });
+  const fa = $("formAll");
+  if (fa) fa.onclick = () => {
+    const { combos } = state.formCombos;
+    const allIn = combos.every((k) => memoHas(t, k));
+    combos.forEach((k) => memoToggle(t, k, !allIn)); redraw();
+  };
+  const fab = $("memofab"); if (fab) fab.onclick = () => openMemo(v, race, od);
+}
+
+// 買い目メモ: 合成オッズ・配分・想定払戻
+function openMemo(v, race, od) {
+  state.memoSort = state.memoSort || "boat";
+  state.memoMode = state.memoMode || "pay";
+  const list = memoLoad();
+  const odd = (m) => olo(od?.[m.t]?.[m.k]);
+  const withOdds = list.filter((m) => odd(m) > 0);
+  const synth = withOdds.length ? 1 / withOdds.reduce((a, m) => a + 1 / odd(m), 0) : null;
+  const total = list.reduce((a, m) => a + (m.amt || 0), 0);
+  const sorted = [...list].sort((a, b) => state.memoSort === "odds" ? (odd(a) || 1e9) - (odd(b) || 1e9)
+    : (a.t + a.k).localeCompare(b.t + b.k));
+  const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  const rows = sorted.map((m) => {
+    const o = odd(m), pay = o ? Math.floor(o * m.amt) : null, pl = pay != null ? pay - total : null;
+    return `<tr><td>${m.k.split(/[-=]/).map(Number).map(bb).join(ORDERED[m.t] ? "-" : "=")}<br><small class="cnt">${ONAME[m.t]}</small></td>
+      <td>${ofmt(od?.[m.t]?.[m.k])}</td>
+      <td><input class="amt" type="number" min="0" step="1" value="${(m.amt || 0) / 100}" data-t="${m.t}" data-k="${m.k}"><small>00円</small></td>
+      <td class="payc">${pay != null ? pay.toLocaleString() + "円" : "-"}<br><small class="${pl >= 0 ? "plus" : "minus"}">${pl != null ? (pl >= 0 ? "+" : "") + pl.toLocaleString() + "円" : ""}</small></td>
+      <td><button class="chk2" data-del="${m.t}|${m.k}">削</button></td></tr>`;
+  }).join("");
+  $("modal").hidden = false;
+  $("sheet").innerHTML = `
+    <button class="close" id="mclose">閉じる</button>
+    <h2>買い目メモ <small style="color:var(--sub)">${esc(v.name)} ${race.no}R</small></h2>
+    <div class="card" style="margin-top:10px">
+      <div class="orow"><span>合成オッズ</span><b style="font-size:20px">${synth ? synth.toFixed(1) + "倍" : "-"}</b></div>
+      <div class="orow">
+        <select id="mmode"><option value="pay" ${state.memoMode === "pay" ? "selected" : ""}>払戻が揃う配分</option><option value="even" ${state.memoMode === "even" ? "selected" : ""}>均等配分</option></select>
+        <span><input id="mtotal" class="amt" type="number" min="0" value="${Math.max(total / 100, list.length)}"><small>00円</small></span>
+        <button class="pill2 on" id="mapply">変更</button>
+      </div>
+      <div class="note">合計 ${total.toLocaleString()}円・${list.length}点。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。</div>
+    </div>
+    <div class="orow"><div class="seg"><button class="pill2 ${state.memoSort === "boat" ? "on" : ""}" data-ms="boat">枠番順</button><button class="pill2 ${state.memoSort === "odds" ? "on" : ""}" data-ms="odds">オッズ順</button></div>
+      <span class="cnt">${od?.time ? "オッズ " + esc(od.time) : "締切時オッズ"}</span></div>
+    <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>購入金額</th><th>想定払戻<br>収支</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
+    ${list.length ? '<div style="text-align:center;margin-top:12px"><button class="pill2" id="mclear">すべての買い目を削除</button></div>' : ""}`;
+  const re = () => openMemo(v, race, od);
+  $("mclose").onclick = () => { closeModal(); drawOddsTab(v, race, true); };
+  document.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => { state.memoSort = b.dataset.ms; re(); });
+  $("mmode").onchange = (e) => { state.memoMode = e.target.value; };
+  document.querySelectorAll("input.amt[data-k]").forEach((inp) => inp.onchange = () => {
+    const l = memoLoad(); const m = l.find((x) => x.t === inp.dataset.t && x.k === inp.dataset.k);
+    if (m) m.amt = Math.max(0, Math.round(Number(inp.value) || 0)) * 100;
+    memoSave(l); re();
+  });
+  document.querySelectorAll("[data-del]").forEach((b) => b.onclick = () => {
+    const [t, k] = b.dataset.del.split("|"); memoToggle(t, k, false); re();
+  });
+  const cl = $("mclear"); if (cl) cl.onclick = () => { memoSave([]); re(); };
+  $("mapply").onclick = () => {
+    const units = Math.max(0, Math.round(Number($("mtotal").value) || 0));
+    const l = memoLoad();
+    if (!l.length) return;
+    if (state.memoMode === "even" || l.some((m) => !(odd(m) > 0))) {
+      const base = Math.floor(units / l.length), rest = units - base * l.length;
+      l.forEach((m, i) => { m.amt = (base + (i < rest ? 1 : 0)) * 100; });
+    } else {
+      // 1/オッズ に比例(どれが当たっても払戻がほぼ同じ)
+      const w = l.map((m) => 1 / odd(m)), sw = w.reduce((a, b) => a + b, 0);
+      const raw = w.map((x) => x / sw * units);
+      const u = raw.map((x) => Math.max(1, Math.floor(x)));
+      while (u.reduce((a, b) => a + b, 0) > units && Math.max(...u) > 1) u[u.indexOf(Math.max(...u))]--;
+      let rest = units - u.reduce((a, b) => a + b, 0);
+      raw.map((x, i) => [x - Math.floor(x), i]).sort((a, b) => b[0] - a[0]).forEach(([, i]) => { if (rest > 0) { u[i]++; rest--; } });
+      l.forEach((m, i) => { m.amt = u[i] * 100; });
+    }
+    memoSave(l); re();
+  };
 }
 
 // ---------------------------------------------------------------- 共通
