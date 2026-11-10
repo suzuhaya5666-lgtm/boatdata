@@ -202,6 +202,20 @@ function go(screen, opts = {}) {
   if (opts.venue) store.set("venue", opts.venue);
   draw();
   window.scrollTo(0, 0);
+  if (screen === "list") scrollToNext();
+}
+
+// 今日なら、直近で締切を過ぎたレースの次(=次に締切が来るレース)まで送る
+function scrollToNext() {
+  const now = nowJST();
+  if (state.date !== now.date) return;
+  const races = Object.values(state.day.venues[state.venue].races).sort((a, b) => a.no - b.no);
+  const next = races.find((r) => r.deadline && r.deadline > now.time);
+  if (!next || next.no === races[0].no) return;
+  const el = document.getElementById("r" + next.no);
+  if (!el) return;
+  const y = el.getBoundingClientRect().top + window.scrollY - $("bar").offsetHeight - 10;
+  window.scrollTo(0, y);
 }
 
 function draw() {
@@ -286,7 +300,7 @@ function drawList() {
     const res = done ? `<div class="res">
         ${tri ? `<span>3連単 <b>${tri.combo}</b> ${tri.yen.toLocaleString()}円${tri.pop ? `(${tri.pop}番人気)` : ""}</span>` : ""}
         ${r.kimarite ? `<span>決まり手 <b>${esc(r.kimarite)}</b></span>` : ""}</div>` : "";
-    return `<div class="race">
+    return `<div class="race" id="r${r.no}">
       <div class="head"><span class="no">${r.no}R</span><span class="tag">${esc(r.name || "")}</span>
         <span class="dead">締切<b>${r.deadline || "-"}</b></span>${badge}</div>
       ${lanes}${res}
