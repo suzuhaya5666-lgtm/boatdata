@@ -181,6 +181,12 @@
   .o3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 6px; }
   .oblk { display: flex; flex-direction: column; gap: 3px; }
   .obh { font-weight: 800; font-size: 13px; }
+  table.paytbl { width: auto; min-width: 320px; max-width: 520px; }
+  table.paytbl th[rowspan] { background: #f6f8fb; font-weight: 700; color: var(--ink); white-space: nowrap; }
+  table.paytbl tr.first td, table.paytbl tr.first th { border-top: 2px solid #adb5bd; }
+  table.paytbl td.yen { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 15px; }
+  table.paytbl td.combo { text-align: left; }
+  .sepc { margin: 0 2px; color: var(--sub); }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -568,19 +574,23 @@ async function drawResultTab(v, race) {
       <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>${e.class ? ` <span class="cls ${e.class}">${e.class}</span>` : ""}</td>
       <td>${e.course ?? "-"}</td><td>${esc(e.st ?? "-")}</td><td>${e.exh != null ? fmt(e.exh) : "-"}</td><td>${esc(e.time ?? "-")}</td></tr>`).join("");
 
+  // 払戻金: 券種ごとに区切った表(組番は枠の色)
   let pay = "";
   if (race.payouts && Object.keys(race.payouts).length) {
-    pay = '<div class="pay">' + BETS.filter((b) => race.payouts[b]).map((b) =>
-      race.payouts[b].map((p, i) => `
-        <span class="k">${i === 0 ? b : ""}</span><span>${p.combo}</span>
-        <span class="y">${p.yen.toLocaleString()}円</span><span class="pp">${p.pop ? p.pop + "番人気" : ""}</span>`
-      ).join("")).join("") + "</div>";
+    const badge = (combo) => combo.split("-").map((b) => `<span class="mini k${b}">${b}</span>`)
+      .join(`<span class="sepc">${/連複|拡連複/.test(combo) ? "=" : "-"}</span>`);
+    pay = `<table class="grid2 paytbl"><thead><tr><th>券種</th><th>組番</th><th>払戻金</th><th>人気</th></tr></thead><tbody>` +
+      BETS.filter((b) => race.payouts[b]).map((b) => race.payouts[b].map((p, i) => `<tr class="${i === 0 ? "first" : ""}">
+        ${i === 0 ? `<th rowspan="${race.payouts[b].length}">${b}</th>` : ""}
+        <td class="combo">${p.combo.split("-").map((x) => `<span class="mini k${x}">${x}</span>`).join(`<span class="sepc">${/複/.test(b) ? "=" : "-"}</span>`)}</td>
+        <td class="yen">${p.yen.toLocaleString()}<small>円</small></td>
+        <td>${p.pop ? p.pop + "番人気" : "-"}</td></tr>`).join("")).join("") + "</tbody></table>";
   }
 
   // オッズ表
   const bb = (b) => `<span class="mini k${b}">${b}</span>`;
   const oc = (val, hit) => `<td class="${hit ? "hitc" : ""}">${val == null ? "-" : val.toFixed(1)}</td>`;
-  let oddsHtml = '<div class="note">この レースのオッズはまだ取り込んでいません（結果のあとに取り込みます）。</div>';
+  let oddsHtml = '<div class="note">このレースのオッズはまだ取り込んでいません（結果のあとに取り込みます）。</div>';
   if (od) {
     const B = [1, 2, 3, 4, 5, 6];
     const t2 = `<table class="grid2 odds"><thead><tr><th>2着＼1着</th>${B.map((a) => `<th>${bb(a)}</th>`).join("")}</tr></thead><tbody>
