@@ -1,0 +1,222 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ボートデータ">
+<title>ボートレース データ</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #fff; --ink: #1d2733; --sub: #6b7684; --line: #e3e7ed;
+    --accent: #0b6bcb; --hit: #d9480f;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 15px;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+  header { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line);
+    padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  input[type=date] { font-size: 16px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+  button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; color: var(--ink); }
+  button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button:disabled { opacity: .35; }
+  .venues, .races { margin-top: 8px; overflow-x: auto; flex-wrap: nowrap; }
+  .races button { min-width: 44px; padding: 6px 0; }
+  .updated { color: var(--sub); font-size: 12px; margin-left: auto; }
+  main { padding: 12px; max-width: 900px; margin: 0 auto; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
+  h2 { margin: 0 0 4px; font-size: 18px; }
+  .meta { color: var(--sub); font-size: 13px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .tbl { width: 100%; overflow-x: auto; margin-top: 10px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; white-space: nowrap; }
+  th, td { padding: 6px 6px; border-bottom: 1px solid var(--line); text-align: center; }
+  th { color: var(--sub); font-weight: 500; font-size: 12px; }
+  td.name { text-align: left; }
+  td.name small { color: var(--sub); }
+  .waku { display: inline-block; width: 26px; height: 26px; line-height: 24px; border-radius: 6px; font-weight: 700; border: 1px solid #999; }
+  .w1 { background: #fff; color: #000; } .w2 { background: #222; color: #fff; } .w3 { background: #e03131; color: #fff; }
+  .w4 { background: #1c7ed6; color: #fff; } .w5 { background: #fcc419; color: #000; } .w6 { background: #2f9e44; color: #fff; }
+  .p1 { color: var(--hit); font-weight: 700; }
+  .cls { font-size: 11px; padding: 1px 4px; border-radius: 4px; background: #eef2f7; margin-left: 4px; }
+  .cls.A1 { background: #ffe3e3; color: #c92a2a; }
+  .pay { display: grid; grid-template-columns: 4.5em 1fr auto auto; gap: 4px 10px; font-size: 14px; margin-top: 10px; }
+  .pay .k { color: var(--sub); }
+  .pay .y { text-align: right; font-variant-numeric: tabular-nums; }
+  .pay .pp { color: var(--sub); font-size: 12px; }
+  .empty { text-align: center; color: var(--sub); padding: 40px 0; }
+  nav { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
+    display: flex; padding-bottom: env(safe-area-inset-bottom); }
+  nav button { flex: 1; border: 0; border-radius: 0; padding: 12px 0; background: none; color: var(--sub); }
+  nav button.on { color: var(--accent); font-weight: 700; background: none; }
+  .soon { color: var(--sub); }
+</style>
+</head>
+<body>
+<header>
+  <div class="row">
+    <button id="prev" aria-label="前の日">◀</button>
+    <input type="date" id="date">
+    <button id="next" aria-label="次の日">▶</button>
+    <span class="updated" id="updated"></span>
+  </div>
+  <div class="row venues" id="venues"></div>
+  <div class="row races" id="races"></div>
+</header>
+
+<main id="view-race"></main>
+<main id="view-bets" hidden>
+  <div class="card soon">舟券の収支記録は次の段階で作ります。</div>
+</main>
+
+<nav>
+  <button class="on" data-view="race">レース</button>
+  <button data-view="bets">収支</button>
+</nav>
+
+<script>
+const BETS = ["単勝", "複勝", "2連単", "2連複", "拡連複", "3連単", "3連複"];
+const state = { index: null, day: null, date: null, venue: null, race: 1 };
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch (e) {} },
+};
+const fmt = (v, d = 2) => (v === null || v === undefined) ? "-" : Number(v).toFixed(d);
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+async function getJSON(path) {
+  const r = await fetch(path + "?t=" + Date.now());
+  if (!r.ok) throw new Error(r.status);
+  return r.json();
+}
+
+async function init() {
+  try {
+    state.index = await getJSON("data/index.json");
+  } catch (e) {
+    $("view-race").innerHTML = '<div class="empty">まだデータがありません。<br>GitHub の Actions で collect を実行してください。</div>';
+    return;
+  }
+  $("updated").textContent = "更新 " + state.index.updated;
+  const days = state.index.days;
+  if (!days.length) return;
+  const saved = store.get("venue");
+  state.venue = saved && state.index.venues[saved] ? saved : null;
+  await loadDay(days[days.length - 1].date);
+}
+
+function dayList() { return state.index.days.map((d) => d.date); }
+
+async function loadDay(date) {
+  state.date = date;
+  $("date").value = date;
+  const list = dayList();
+  const i = list.indexOf(date);
+  $("prev").disabled = i <= 0 && list[0] >= date;
+  $("next").disabled = list.length === 0 || date >= list[list.length - 1];
+  try {
+    state.day = await getJSON(`data/races/${date.slice(0, 4)}/${date.replace(/-/g, "")}.json`);
+  } catch (e) {
+    state.day = null;
+  }
+  renderVenues();
+  render();
+}
+
+function renderVenues() {
+  const open = state.day ? Object.keys(state.day.venues) : [];
+  if (!open.includes(state.venue)) state.venue = open[0] || state.venue;
+  $("venues").innerHTML = Object.entries(state.index.venues).map(([code, name]) =>
+    `<button data-v="${code}" class="${code === state.venue ? "on" : ""}" ${open.includes(code) ? "" : "disabled"}>${esc(name)}</button>`
+  ).join("");
+  const races = state.day?.venues[state.venue]?.races || {};
+  const nos = Object.keys(races).map(Number).sort((a, b) => a - b);
+  if (!nos.includes(state.race)) state.race = nos[0] || 1;
+  $("races").innerHTML = nos.map((n) =>
+    `<button data-r="${n}" class="${n === state.race ? "on" : ""}">${n}R</button>`).join("");
+}
+
+function render() {
+  const v = state.day?.venues[state.venue];
+  const race = v?.races[String(state.race)];
+  if (!race) {
+    $("view-race").innerHTML = '<div class="empty">この日は対象の場で開催がないか、まだデータがありません。</div>';
+    return;
+  }
+  const w = race.weather;
+  const meta = [
+    race.deadline ? `締切 ${race.deadline}` : "",
+    race.distance ? `${race.distance}m` : "",
+    w ? `${esc(w.sky)} 風 ${esc(w.wind_dir)} ${w.wind}m 波 ${w.wave}cm` : "",
+    race.kimarite ? `決まり手 ${esc(race.kimarite)}` : "",
+  ].filter(Boolean).map((s) => `<span>${s}</span>`).join("");
+
+  const rows = race.entries.map((e) => `
+    <tr>
+      <td><span class="waku w${e.boat}">${e.boat}</span></td>
+      <td class="name">${esc(e.name || "")}${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}<br>
+        <small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}</small></td>
+      <td>${fmt(e.nat_win)}<br><small>${fmt(e.nat_2, 1)}%</small></td>
+      <td>${fmt(e.loc_win)}<br><small>${fmt(e.loc_2, 1)}%</small></td>
+      <td>${e.motor_no ?? "-"}<br><small>${fmt(e.motor_2, 1)}%</small></td>
+      <td>${e.exh != null ? fmt(e.exh) : "-"}</td>
+      <td>${e.course ?? "-"}</td>
+      <td>${esc(e.st ?? "-")}</td>
+      <td class="${e.place === 1 ? "p1" : ""}">${e.place ?? esc(e.status ?? "-")}</td>
+    </tr>`).join("");
+
+  let pay = "";
+  if (race.payouts) {
+    pay = '<div class="pay">' + BETS.filter((b) => race.payouts[b]).map((b) =>
+      race.payouts[b].map((p, i) => `
+        <span class="k">${i === 0 ? b : ""}</span><span>${p.combo}</span>
+        <span class="y">${p.yen.toLocaleString()}円</span><span class="pp">${p.pop ? p.pop + "番人気" : ""}</span>`
+      ).join("")).join("") + "</div>";
+  }
+
+  $("view-race").innerHTML = `
+    <div class="card">
+      <h2>${esc(v.name)} ${race.no}R ${esc(race.name || "")}</h2>
+      <div class="meta">${meta}</div>
+      <div class="tbl"><table>
+        <thead><tr><th>枠</th><th>選手</th><th>全国<br>勝率</th><th>当地<br>勝率</th><th>モーター<br>2連率</th>
+          <th>展示</th><th>進入</th><th>ST</th><th>着</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+    ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}`;
+}
+
+$("venues").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-v]");
+  if (!b || b.disabled) return;
+  state.venue = b.dataset.v;
+  store.set("venue", state.venue);
+  renderVenues(); render();
+});
+$("races").addEventListener("click", (ev) => {
+  const b = ev.target.closest("button[data-r]");
+  if (!b) return;
+  state.race = Number(b.dataset.r);
+  renderVenues(); render();
+});
+$("date").addEventListener("change", (ev) => ev.target.value && loadDay(ev.target.value));
+function step(dir) {
+  const list = dayList();
+  const cand = dir < 0 ? list.filter((d) => d < state.date).pop() : list.find((d) => d > state.date);
+  if (cand) loadDay(cand);
+}
+$("prev").addEventListener("click", () => step(-1));
+$("next").addEventListener("click", () => step(1));
+document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
+  $("view-race").hidden = b.dataset.view !== "race";
+  $("view-bets").hidden = b.dataset.view !== "bets";
+}));
+
+init();
+</script>
+</body>
+</html>
