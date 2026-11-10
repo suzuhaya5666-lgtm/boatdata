@@ -181,11 +181,12 @@
   .o3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 6px; }
   .oblk { display: flex; flex-direction: column; gap: 3px; }
   .obh { font-weight: 800; font-size: 13px; }
-  table.paytbl { width: auto; min-width: 320px; max-width: 520px; }
+  table.paytbl { width: auto; min-width: 320px; max-width: 700px; }
   table.paytbl th[rowspan] { background: #f6f8fb; font-weight: 700; color: var(--ink); white-space: nowrap; }
   table.paytbl tr.first td, table.paytbl tr.first th { border-top: 2px solid #adb5bd; }
   table.paytbl td.yen { text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 15px; }
   table.paytbl td.combo { text-align: left; }
+  table.paytbl td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
   .sepc { margin: 0 2px; color: var(--sub); }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
@@ -563,7 +564,7 @@ async function drawResultTab(v, race) {
     $("view-race").innerHTML = '<div class="empty">結果はまだです。結果は夜（23:37・1:07）と朝の取り込みで入ります。</div>';
     return;
   }
-  const od = await getOdds(state.date.replace(/-/g, ""), state.venue, race.no);
+  const [od, dm] = await Promise.all([getOdds(state.date.replace(/-/g, ""), state.venue, race.no), computeDeme(race)]);
   if (state.dtab !== "result") return;
   const res = [1, 2, 3].map((p) => race.entries.find((e) => e.place === p)?.boat);
   const order = [...race.entries].sort((a, b) => (a.place ?? 9) - (b.place ?? 9));
@@ -579,12 +580,21 @@ async function drawResultTab(v, race) {
   if (race.payouts && Object.keys(race.payouts).length) {
     const badge = (combo) => combo.split("-").map((b) => `<span class="mini k${b}">${b}</span>`)
       .join(`<span class="sepc">${/連複|拡連複/.test(combo) ? "=" : "-"}</span>`);
-    pay = `<table class="grid2 paytbl"><thead><tr><th>券種</th><th>組番</th><th>払戻金</th><th>人気</th></tr></thead><tbody>` +
+    const norm = (b, combo) => /複/.test(b) ? combo.split("-").map(Number).sort().join("-") : combo;
+    const demeCells = (b, combo, yen) => {
+      if (!dm || !dm.prob[b]) return "<td>-</td><td>-</td>";
+      const k = norm(b, combo), p = dm.prob[b][k], r = dm.rank[b][k];
+      const value = p && yen / 100 > 1 / p;  // 払戻が目安オッズより高い = 確率のわりに配当が高い
+      return `<td class="${value ? "val" : ""}">${p ? (1 / p).toFixed(1) + "<small>倍</small>" : "-"}</td><td>${r ? `<b class="${r <= 3 ? "p1" : ""}">${r}位</b><small class="cnt">/${dm.rank[b]._n}</small>` : "-"}</td>`;
+    };
+    pay = `<table class="grid2 paytbl"><thead><tr><th>券種</th><th>組番</th><th>払戻金</th><th>人気</th><th>目安オッズ</th><th>出目<br>ランキング</th></tr></thead><tbody>` +
       BETS.filter((b) => race.payouts[b]).map((b) => race.payouts[b].map((p, i) => `<tr class="${i === 0 ? "first" : ""}">
         ${i === 0 ? `<th rowspan="${race.payouts[b].length}">${b}</th>` : ""}
         <td class="combo">${p.combo.split("-").map((x) => `<span class="mini k${x}">${x}</span>`).join(`<span class="sepc">${/複/.test(b) ? "=" : "-"}</span>`)}</td>
         <td class="yen">${p.yen.toLocaleString()}<small>円</small></td>
-        <td>${p.pop ? p.pop + "番人気" : "-"}</td></tr>`).join("")).join("") + "</tbody></table>";
+        <td>${p.pop ? p.pop + "番人気" : "-"}</td>
+        ${demeCells(b, p.combo, p.yen)}</tr>`).join("")).join("") + "</tbody></table>" +
+      `<div class="note">目安オッズと出目ランキングは、出目確率タブと同じ計算（${dm?.exh ? "スタート展示の進入" : "枠なり"}・選んだ材料）での値です。払戻金÷100が目安オッズより大きい（確率のわりに配当が高かった）ものは緑にしています。過去のレースは、そのレース自体も成績の集計に入っているので、実際より少し当たりやすく見えます。</div>`;
   }
 
   // オッズ表
@@ -887,6 +897,41 @@ function sumBy(tri, keyFn) {
   const m = new Map();
   tri.forEach((t) => { const k = keyFn(t.c); m.set(k, (m.get(k) || 0) + t.p); });
   return [...m.entries()].map(([k, p]) => ({ k, p })).sort((a, b) => b.p - a.p);
+}
+
+// 出目確率タブと同じ設定(進入・材料)で、艇番ベースの確率を出す
+async function computeDeme(race) {
+  const hd = state.date.replace(/-/g, "");
+  const [model, vs, bi, ...files] = await Promise.all([
+    cached("data/model/weights.json"), cached("data/stats/venues.json"),
+    getBefore(hd, state.venue, race.no),
+    ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
+  if (!model || !vs) return null;
+  const racers = Object.fromEntries(race.entries.map((e, i) => [e.boat, files[i]]));
+  const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
+  let base = [0, 1, 2, 3, 4, 5, 6];
+  if (bi?.start?.length === 6) base = [0, ...bi.start.map((s) => s.boat)];
+  const order = state.orders?.[`${state.date}_${state.venue}_${race.no}`] || base;
+  const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model);
+  const tri = demeTri(adj.q).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
+  const prob = {};  // 券種 -> {組番: 確率}
+  const add = (bet, k, p) => { (prob[bet] = prob[bet] || {})[k] = (prob[bet][k] || 0) + p; };
+  tri.forEach(({ b, p }) => {
+    add("単勝", `${b[0]}`, p);
+    add("複勝", `${b[0]}`, p); add("複勝", `${b[1]}`, p);  // 複勝は2着以内
+    add("2連単", `${b[0]}-${b[1]}`, p);
+    add("2連複", [b[0], b[1]].sort().join("-"), p);
+    [[b[0], b[1]], [b[0], b[2]], [b[1], b[2]]].forEach((x) => add("拡連複", x.sort().join("-"), p));
+    add("3連単", b.join("-"), p);
+    add("3連複", [...b].sort().join("-"), p);
+  });
+  const rank = {};
+  Object.entries(prob).forEach(([bet, m]) => {
+    const sorted = Object.entries(m).sort((x, y) => y[1] - x[1]).map((x) => x[0]);
+    rank[bet] = Object.fromEntries(sorted.map((k, i) => [k, i + 1]));
+    rank[bet]._n = sorted.length;
+  });
+  return { prob, rank, exh: !!bi?.start?.length };
 }
 
 async function drawDemeTab(v, race) {
