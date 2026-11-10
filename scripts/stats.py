@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
 """保存済みの競走成績から、場平均・選手別成績・モーター成績を計算する。
 
-  data/stats/venues.json          対象5場のコース別・レース番号別成績(総合/一般戦/重賞)
+  data/stats/venues.json          対象5場のコース別・レース番号別成績(総合/一般戦/G2・G3/SG・G1/女子戦)
   data/stats/racers/<登番>.json   選手ごとのコース別成績(他艇含む)・平均ST・枠別着率・決まり手
   data/stats/motors.json          対象5場のモーター成績(今のモーターの使い始めから)
 
-グレード区分: all=総合, ippan=一般戦, jushou=重賞(SG・G1・G2・G3)
+グレード区分(重ならない): ippan=一般戦(男女混合), g2g3=G2・G3, sgg1=SG・G1, women=女子戦(ヴィーナス・オールレディース)
+all=総合 はすべて
 """
 import datetime as dt
 import glob
@@ -28,7 +29,19 @@ ALL_VENUES = {
 # ナイター開催の場(レースの時刻が成績ファイルに無いため、場で判定する)
 NIGHT = {"01", "07", "12", "15", "19", "20", "24"}
 POINTS = {1: 10, 2: 8, 3: 6, 4: 4, 5: 2, 6: 1}
-CATS = ("all", "ippan", "jushou")
+CATS = ("all", "ippan", "g2g3", "sgg1", "women")
+
+
+def grade_cat(g):
+    if g is None:
+        return None
+    if g["type"] in ("ヴィーナス", "レディース"):
+        return "women"
+    if g["grade"] in ("SG", "G1"):
+        return "sgg1"
+    if g["grade"] in ("G2", "G3"):
+        return "g2g3"
+    return "ippan"
 
 
 def load_races():
@@ -153,18 +166,18 @@ def bucket(recs):
 
 def bycourse(recs, last):
     six = last - dt.timedelta(days=182)
-    out = {k: {} for k in ("10", "6m", "1y", "local", "6m_ippan", "6m_jushou", "1y_ippan", "1y_jushou")}
+    out = {k: {} for k in ("10", "6m", "1y", "local")}
     for c in range(1, 7):
         rc = [r for r in recs if r[2] == c]
         if not rc:
             continue
         sets = {"10": rc[-10:], "1y": rc, "6m": [r for r in rc if r[0] >= six]}
-        for cat in ("ippan", "jushou"):
+        for cat in CATS[1:]:
             sets[f"1y_{cat}"] = [r for r in rc if r[7] == cat]
             sets[f"6m_{cat}"] = [r for r in sets["6m"] if r[7] == cat]
         for k, rs in sets.items():
             if rs:
-                out[k][str(c)] = bucket(rs)
+                out.setdefault(k, {})[str(c)] = bucket(rs)
         for code in VENUES:
             rl = [r for r in rc if r[1] == code]
             if rl:
@@ -202,7 +215,7 @@ def main():
         if len(ents) < 2:
             continue
         g = grades.get((code, date.isoformat()))
-        cat = None if g is None else ("ippan" if g["grade"] == "一般" else "jushou")
+        cat = grade_cat(g)
         races.append((date, code, race, ents, cat))
     first = min(r[0] for r in races)
     last = max(r[0] for r in races)
@@ -247,7 +260,9 @@ def main():
         rr = {"regno": regno, "name": names.get(regno, ""), "period": period,
               "last": recs[-1][0].isoformat(),
               "venues": {ALL_VENUES.get(k, k): n for k, n in sorted(venues_count[regno].items(), key=lambda x: -x[1])},
-              "sheet": {cat: sheet([r for r in recs if in_cat(cat, r[7])]) for cat in CATS},
+              "female": any(r[7] == "women" for r in recs),
+              "sheet": {cat: sheet(rs) for cat in CATS
+                        for rs in [[r for r in recs if in_cat(cat, r[7])]] if rs},
               "bycourse": bycourse(recs, last)}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:
             json.dump(rr, f, ensure_ascii=False, separators=(",", ":"))
