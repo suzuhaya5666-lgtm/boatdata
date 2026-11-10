@@ -1,0 +1,48 @@
+name: before_past
+
+# 過去の直前情報(チルト・スタート展示など)のまとめ取り。取得済みは飛ばすので何度動いても続きから。
+# 残りがあれば自分をもう一度動かす(全部取れたら止まる)。
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "開始日 YYYYMMDD"
+        default: "20231110"
+      end:
+        description: "終了日 YYYYMMDD"
+        default: "20261109"
+      chain:
+        description: "残りがあれば続けて動かす"
+        default: "true"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: before_past
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 直前情報の取得
+        id: run
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python -u scripts/before_past.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes 320 --workers 3 | tee out.log
+          if grep -q "残り 0件" out.log; then echo "left=0" >> $GITHUB_OUTPUT; else echo "left=1" >> $GITHUB_OUTPUT; fi
+      - name: 続きを動かす
+        if: steps.run.outputs.left == '1' && inputs.chain == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/before_past.yml/dispatches \
+            -f ref=main -f "inputs[start]=${{ inputs.start }}" -f "inputs[end]=${{ inputs.end }}" -f "inputs[chain]=true"
