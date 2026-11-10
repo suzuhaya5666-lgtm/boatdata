@@ -88,7 +88,7 @@ def build():
                             b["motor_2"] if b.get("motor_2") is not None else np.nan,
                             CLS.get(b.get("class"), np.nan), st[0] / st[1] if st[1] else np.nan]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
-                H.append(bool(de))  # 出走表(勝率・モーターなど)があるレースか
+                H.append(any(e.get("nat_win") is not None for e in de.values()))  # 出走表(勝率など)があるレースか
         for _, code, race, ents in by_day[day]:
             for e in ents:
                 c, p = e["course"], e.get("place")
