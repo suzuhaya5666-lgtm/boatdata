@@ -8,27 +8,85 @@
 <title>ボートレース データ</title>
 <style>
   :root {
-    --bg: #f4f6f9; --card: #fff; --ink: #1d2733; --sub: #6b7684; --line: #e3e7ed;
-    --accent: #0b6bcb; --hit: #d9480f;
+    --bg: #f3f5f9; --card: #fff; --ink: #1d2733; --sub: #6b7684; --line: #e3e7ed;
+    --accent: #1565c0; --hit: #d9480f; --cell-off: #eceff4;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink);
     font-family: -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; font-size: 15px;
-    padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
-  header { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line);
-    padding: calc(8px + env(safe-area-inset-top)) 12px 8px; }
-  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  input[type=date] { font-size: 16px; padding: 6px 8px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-  button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; color: var(--ink); }
+    padding-bottom: calc(64px + env(safe-area-inset-bottom)); -webkit-text-size-adjust: 100%; }
+  button { font: inherit; border: 1px solid var(--line); background: #fff; border-radius: 8px; padding: 6px 10px; color: var(--ink); cursor: pointer; }
   button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
   button:disabled { opacity: .35; }
-  .venues, .races { margin-top: 8px; overflow-x: auto; flex-wrap: nowrap; }
-  .races button { min-width: 44px; padding: 6px 0; }
-  .updated { color: var(--sub); font-size: 12px; margin-left: auto; }
   main { padding: 12px; max-width: 900px; margin: 0 auto; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-bottom: 12px; }
   h2 { margin: 0 0 4px; font-size: 18px; }
   .meta { color: var(--sub); font-size: 13px; display: flex; gap: 12px; flex-wrap: wrap; }
+  .empty { text-align: center; color: var(--sub); padding: 40px 0; }
+  .note { color: var(--sub); font-size: 12px; margin-top: 6px; }
+
+  /* ---- 上部バー */
+  .bar { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line);
+    padding: calc(10px + env(safe-area-inset-top)) 12px 10px; }
+  .bar .in { max-width: 900px; margin: 0 auto; }
+  .datenav { display: flex; align-items: center; gap: 10px; }
+  .datenav .pill { border-radius: 999px; padding: 8px 16px; color: var(--sub); white-space: nowrap; }
+  .datenav .label { flex: 1; text-align: center; font-weight: 800; font-size: 18px; position: relative; white-space: nowrap; }
+  @media (max-width: 520px) {
+    .datenav { gap: 6px; }
+    .datenav .pill { padding: 7px 10px; font-size: 14px; }
+    .datenav .label { font-size: 16px; }
+    .datenav .label .wide { display: none; }
+  }
+  .datenav .label input { position: absolute; inset: 0; opacity: 0; width: 100%; }
+  .datenav .label .cal { font-size: 15px; margin-left: 4px; }
+  .back { border: 0; background: none; color: var(--accent); padding: 4px 0; font-weight: 600; }
+  .bar h1 { font-size: 20px; margin: 4px 0 0; }
+  .bar .sub { color: var(--sub); font-size: 13px; margin-top: 2px; }
+  .chips { display: flex; gap: 6px; overflow-x: auto; margin-top: 8px; }
+  .chips button { min-width: 46px; padding: 6px 0; }
+  .updated { color: var(--sub); font-size: 12px; text-align: right; margin-top: 6px; }
+
+  /* ---- 場選択 */
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--line); gap: 1px; }
+  .cell { background: var(--card); min-height: 132px; padding: 14px 8px; text-align: center; border: 0; border-radius: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  .cell .vn { font-size: 24px; font-weight: 800; letter-spacing: .05em; }
+  .cell .dl { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+  .cell .st { font-size: 17px; font-weight: 800; }
+  .cell .st.done { color: #9aa3ae; font-weight: 700; }
+  .cell .tt { font-size: 11px; color: var(--sub); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cell.off { background: var(--cell-off); cursor: default; }
+  .cell.off .vn { color: #b0b8c3; }
+  .night { display: inline-block; background: #d0bfff; color: #3b2a8a; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
+  .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: #e9ecef; color: #6b7684; }
+  .tag.final { background: #ffe8cc; color: #d9480f; }
+
+  /* ---- 出走表一覧 */
+  .race { background: var(--card); border: 1px solid var(--line); border-radius: 12px; margin-bottom: 14px; overflow: hidden; }
+  .race .head { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+  .race .no { font-size: 24px; font-weight: 800; min-width: 2.2em; }
+  .race .dead { font-size: 15px; color: var(--sub); }
+  .race .dead b { font-size: 20px; color: var(--ink); margin-left: 4px; }
+  .race .badge { margin-left: auto; background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; padding: 6px 10px; border-radius: 6px; }
+  .race .badge.wait { background: #e9ecef; color: var(--sub); }
+  .lane { display: grid; grid-template-columns: 52px 1fr auto 64px; align-items: center; border-top: 1px solid var(--line); min-height: 52px; }
+  .lane .wk { align-self: stretch; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; }
+  .lane .nm { padding: 0 12px; font-size: 18px; font-weight: 700; }
+  .lane .br { text-align: center; color: var(--ink); font-weight: 600; padding-right: 8px; }
+  .lane .pl { font-size: 13px; color: var(--sub); text-align: center; }
+  .lane .pl.p1 { color: var(--hit); font-weight: 800; font-size: 15px; }
+  .k1 { background: #f1f3f5; color: #000; } .k2 { background: #111; color: #fff; } .k3 { background: #e03131; color: #fff; }
+  .k4 { background: #1971c2; color: #fff; } .k5 { background: #ffe03d; color: #000; } .k6 { background: #0ca678; color: #fff; }
+  .cls { display: inline-block; font-size: 13px; font-weight: 800; padding: 2px 6px; border-radius: 4px; color: #fff; min-width: 2.4em; text-align: center; }
+  .cls.A1 { background: #e8590c; } .cls.A2 { background: #f59f00; } .cls.B1 { background: #1c7ed6; } .cls.B2 { background: #868e96; }
+  .res { border-top: 1px solid var(--line); padding: 10px 14px; font-size: 14px; display: flex; gap: 14px; flex-wrap: wrap; color: var(--sub); }
+  .res b { color: var(--ink); font-size: 16px; }
+  .race .acts { border-top: 1px solid var(--line); padding: 10px 14px; }
+  .race .acts button { width: 100%; border: 1.5px solid #1d2733; border-radius: 999px; padding: 10px; font-weight: 700; }
+
+  /* ---- 詳細 */
   .tbl { width: 100%; overflow-x: auto; margin-top: 10px; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; white-space: nowrap; }
   th, td { padding: 6px 6px; border-bottom: 1px solid var(--line); text-align: center; }
@@ -38,23 +96,18 @@
   .waku { display: inline-block; width: 26px; height: 26px; line-height: 24px; border-radius: 6px; font-weight: 700; border: 1px solid #999; }
   .w1 { background: #fff; color: #000; } .w2 { background: #222; color: #fff; } .w3 { background: #e03131; color: #fff; }
   .w4 { background: #1c7ed6; color: #fff; } .w5 { background: #fcc419; color: #000; } .w6 { background: #2f9e44; color: #fff; }
+  td.name .cls { font-size: 11px; margin-left: 4px; padding: 1px 4px; }
   .p1 { color: var(--hit); font-weight: 700; }
-  .cls { font-size: 11px; padding: 1px 4px; border-radius: 4px; background: #eef2f7; margin-left: 4px; }
-  .cls.A1 { background: #ffe3e3; color: #c92a2a; }
   .pay { display: grid; grid-template-columns: 4.5em 1fr auto auto; gap: 4px 10px; font-size: 14px; margin-top: 10px; }
   .pay .k { color: var(--sub); }
   .pay .y { text-align: right; font-variant-numeric: tabular-nums; }
   .pay .pp { color: var(--sub); font-size: 12px; }
-  .empty { text-align: center; color: var(--sub); padding: 40px 0; }
-  nav { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
-    display: flex; padding-bottom: env(safe-area-inset-bottom); }
-  nav button { flex: 1; border: 0; border-radius: 0; padding: 12px 0; background: none; color: var(--sub); }
-  nav button.on { color: var(--accent); font-weight: 700; background: none; }
-  .soon { color: var(--sub); }
-  td.name .nm { color: var(--accent); text-decoration: underline; text-decoration-color: #b8cff0; cursor: pointer; }
+  .nm[data-reg] { color: var(--accent); cursor: pointer; }
+  td.name .nm { text-decoration: underline; text-decoration-color: #b8cff0; }
+
+  /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
-  .note { color: var(--sub); font-size: 12px; margin-top: 6px; }
   .own td { font-weight: 700; background: #f7faff; }
   .hi { color: var(--hit); font-weight: 700; }
   #modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
@@ -62,24 +115,20 @@
   #modal .sheet { background: var(--bg); width: 100%; max-width: 900px; max-height: 88vh; overflow-y: auto;
     border-radius: 16px 16px 0 0; padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); }
   #modal .close { float: right; }
+
+  nav { position: fixed; left: 0; right: 0; bottom: 0; background: var(--card); border-top: 1px solid var(--line);
+    display: flex; padding-bottom: env(safe-area-inset-bottom); z-index: 6; }
+  nav button { flex: 1; border: 0; border-radius: 0; padding: 12px 0; background: none; color: var(--sub); }
+  nav button.on { color: var(--accent); font-weight: 700; background: none; }
 </style>
 </head>
 <body>
-<header>
-  <div class="row">
-    <button id="prev" aria-label="前の日">◀</button>
-    <input type="date" id="date">
-    <button id="next" aria-label="次の日">▶</button>
-    <span class="updated" id="updated"></span>
-  </div>
-  <div class="row venues" id="venues"></div>
-  <div class="row races" id="races"></div>
-</header>
+<div class="bar" id="bar"><div class="in" id="barIn"></div></div>
 
 <main id="view-race"></main>
 <main id="view-venue" hidden></main>
 <main id="view-bets" hidden>
-  <div class="card soon">舟券の収支記録は次の段階で作ります。</div>
+  <div class="card" style="color:var(--sub)">舟券の収支記録は次の段階で作ります。</div>
 </main>
 
 <nav>
@@ -91,7 +140,9 @@
 
 <script>
 const BETS = ["単勝", "複勝", "2連単", "2連複", "拡連複", "3連単", "3連複"];
-const state = { index: null, day: null, date: null, venue: null, race: 1 };
+const NIGHT = ["01", "07", "12", "15", "19", "20", "24"];
+const WD = ["日", "月", "火", "水", "木", "金", "土"];
+const state = { index: null, day: null, date: null, venue: null, race: 1, screen: "home", tab: "race" };
 const $ = (id) => document.getElementById(id);
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch (e) { return null; } },
@@ -99,6 +150,20 @@ const store = {
 };
 const fmt = (v, d = 2) => (v === null || v === undefined) ? "-" : Number(v).toFixed(d);
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+function statusText(s) {
+  if (!s) return "";
+  return ({ S: "失格", K: "欠場", L: "出遅", F: "F" })[s[0]] || s;
+}
+function nowJST() {
+  const d = new Date(Date.now() + 9 * 3600 * 1000);
+  return { date: d.toISOString().slice(0, 10), time: d.toISOString().slice(11, 16) };
+}
+function dateLabel(date) {
+  const [y, m, d] = date.split("-").map(Number);
+  const w = WD[new Date(y, m - 1, d).getDay()];
+  return `${date === nowJST().date ? "本日" : ""}${m}月${d}日(${w})`;
+}
 
 async function getJSON(path) {
   const r = await fetch(path + "?t=" + Date.now());
@@ -110,55 +175,140 @@ async function init() {
   try {
     state.index = await getJSON("data/index.json");
   } catch (e) {
-    $("view-race").innerHTML = '<div class="empty">まだデータがありません。<br>GitHub の Actions で collect を実行してください。</div>';
+    $("view-race").innerHTML = '<div class="empty">まだデータがありません。</div>';
     return;
   }
-  $("updated").textContent = "更新 " + state.index.updated;
-  const days = state.index.days;
-  if (!days.length) return;
-  const saved = store.get("venue");
-  state.venue = saved && state.index.venues[saved] ? saved : null;
-  await loadDay(days[days.length - 1].date);
+  const list = dayList();
+  const today = nowJST().date;
+  const start = list.includes(today) ? today : list[list.length - 1];
+  await loadDay(start);
 }
 
 function dayList() { return state.index.days.map((d) => d.date); }
 
 async function loadDay(date) {
   state.date = date;
-  $("date").value = date;
-  const list = dayList();
-  const i = list.indexOf(date);
-  $("prev").disabled = i <= 0 && list[0] >= date;
-  $("next").disabled = list.length === 0 || date >= list[list.length - 1];
   try {
     state.day = await getJSON(`data/races/${date.slice(0, 4)}/${date.replace(/-/g, "")}.json`);
   } catch (e) {
     state.day = null;
   }
-  renderVenues();
-  render();
+  if (state.screen !== "home" && !state.day?.venues[state.venue]) state.screen = "home";
+  draw();
 }
 
-function renderVenues() {
-  const open = state.day ? Object.keys(state.day.venues) : [];
-  if (!open.includes(state.venue)) state.venue = open[0] || state.venue;
-  $("venues").innerHTML = Object.entries(state.index.venues).map(([code, name]) =>
-    `<button data-v="${code}" class="${code === state.venue ? "on" : ""}" ${open.includes(code) ? "" : "disabled"}>${esc(name)}</button>`
-  ).join("");
-  const races = state.day?.venues[state.venue]?.races || {};
-  const nos = Object.keys(races).map(Number).sort((a, b) => a - b);
-  if (!nos.includes(state.race)) state.race = nos[0] || 1;
-  $("races").innerHTML = nos.map((n) =>
-    `<button data-r="${n}" class="${n === state.race ? "on" : ""}">${n}R</button>`).join("");
+function go(screen, opts = {}) {
+  Object.assign(state, opts, { screen });
+  if (opts.venue) store.set("venue", opts.venue);
+  draw();
+  window.scrollTo(0, 0);
 }
 
-function render() {
-  const v = state.day?.venues[state.venue];
-  const race = v?.races[String(state.race)];
-  if (!race) {
-    $("view-race").innerHTML = '<div class="empty">この日は対象の場で開催がないか、まだデータがありません。</div>';
-    return;
-  }
+function draw() {
+  if (state.tab !== "race") { $("bar").hidden = true; return; }
+  $("bar").hidden = false;
+  if (state.screen === "home") drawHome();
+  else if (state.screen === "list") drawList();
+  else drawDetail();
+}
+
+// ---------------------------------------------------------------- 場選択
+function venueStatus(v) {
+  const races = Object.values(v.races).sort((a, b) => a.no - b.no);
+  const now = nowJST();
+  if (state.date < now.date) return { text: "開催終了", done: true };
+  if (state.date > now.date) return { text: `1R ${races[0]?.deadline || ""}`, done: false };
+  const next = races.find((r) => r.deadline && r.deadline > now.time && !r.payouts);
+  return next ? { text: `${next.no}R ${next.deadline}`, done: false } : { text: "開催終了", done: true };
+}
+function dayText(v) {
+  if (v.final) return '<span class="tag final">最終日</span>';
+  if (v.day === 1) return "初日";
+  return v.day ? `${v.day}日目` : "";
+}
+
+function drawHome() {
+  const list = dayList();
+  const prev = list.filter((d) => d < state.date).pop();
+  const next = list.find((d) => d > state.date);
+  $("barIn").innerHTML = `
+    <div class="datenav">
+      <button class="pill" id="prev" ${prev ? "" : "disabled"}>◀ 前日</button>
+      <div class="label">${dateLabel(state.date)}<span class="wide">のレース</span><span class="cal">📅</span>
+        <input type="date" id="pick" value="${state.date}" min="${list[0]}" max="${list[list.length - 1]}"></div>
+      <button class="pill" id="next" ${next ? "" : "disabled"}>翌日 ▶</button>
+    </div>`;
+  $("prev").onclick = () => prev && loadDay(prev);
+  $("next").onclick = () => next && loadDay(next);
+  $("pick").onchange = (ev) => ev.target.value && loadDay(ev.target.value);
+
+  const cells = Object.entries(state.index.venues).map(([code, name]) => {
+    const v = state.day?.venues[code];
+    if (!v) return `<div class="cell off"><div class="vn">${esc(name)}</div></div>`;
+    const s = venueStatus(v);
+    return `<button class="cell" data-v="${code}">
+      <div class="vn">${esc(name)}</div>
+      <div class="dl">${dayText(v)}${NIGHT.includes(code) ? '<span class="night">🌙</span>' : ""}</div>
+      <div class="st ${s.done ? "done" : ""}">${s.text}</div>
+      <div class="tt">${esc(v.title || "")}</div>
+    </button>`;
+  }).join("");
+  $("view-race").innerHTML = `<div class="grid">${cells}</div>
+    <div class="updated">データ更新 ${esc(state.index.updated)}</div>`;
+  $("view-race").querySelectorAll("[data-v]").forEach((b) =>
+    b.addEventListener("click", () => go("list", { venue: b.dataset.v })));
+}
+
+// ---------------------------------------------------------------- 出走表一覧
+function drawList() {
+  const v = state.day.venues[state.venue];
+  $("barIn").innerHTML = `
+    <button class="back" id="back">‹ 場選択</button>
+    <h1>${esc(v.name)} <span style="font-size:15px;font-weight:600">${dateLabel(state.date)}</span></h1>
+    <div class="sub">${esc(v.title || "")} ${v.final ? "・最終日" : v.day ? `・${v.day === 1 ? "初日" : v.day + "日目"}` : ""}</div>`;
+  $("back").onclick = () => go("home");
+
+  const now = nowJST();
+  const races = Object.values(v.races).sort((a, b) => a.no - b.no);
+  $("view-race").innerHTML = races.map((r) => {
+    const done = r.payouts && Object.keys(r.payouts).length;
+    const closed = !done && (state.date < now.date || (state.date === now.date && r.deadline && r.deadline <= now.time));
+    const badge = done ? '<span class="badge">結果確定</span>' : closed ? '<span class="badge wait">締切</span>' : "";
+    const lanes = r.entries.map((e) => `
+      <div class="lane">
+        <div class="wk k${e.boat}">${e.boat}</div>
+        <div><span class="nm" data-reg="${e.regno || ""}" data-course="${e.boat}">${esc(e.name || "")}</span></div>
+        <div>${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}</div>
+        ${done ? `<div class="pl ${e.place === 1 ? "p1" : ""}">${e.place ? e.place + "着" : esc(statusText(e.status))}</div>`
+               : `<div class="br">${esc(e.branch || "")}</div>`}
+      </div>`).join("");
+    const tri = r.payouts?.["3連単"]?.[0];
+    const res = done ? `<div class="res">
+        ${tri ? `<span>3連単 <b>${tri.combo}</b> ${tri.yen.toLocaleString()}円${tri.pop ? `(${tri.pop}番人気)` : ""}</span>` : ""}
+        ${r.kimarite ? `<span>決まり手 <b>${esc(r.kimarite)}</b></span>` : ""}</div>` : "";
+    return `<div class="race">
+      <div class="head"><span class="no">${r.no}R</span><span class="tag">${esc(r.name || "")}</span>
+        <span class="dead">締切<b>${r.deadline || "-"}</b></span>${badge}</div>
+      ${lanes}${res}
+      <div class="acts"><button data-r="${r.no}">出走表・結果をくわしく見る</button></div>
+    </div>`;
+  }).join("");
+  $("view-race").querySelectorAll("button[data-r]").forEach((b) =>
+    b.addEventListener("click", () => go("detail", { race: Number(b.dataset.r) })));
+}
+
+// ---------------------------------------------------------------- レース詳細
+function drawDetail() {
+  const v = state.day.venues[state.venue];
+  const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
+  $("barIn").innerHTML = `
+    <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
+    <div class="chips">${nos.map((n) => `<button data-r="${n}" class="${n === state.race ? "on" : ""}">${n}R</button>`).join("")}</div>`;
+  $("back").onclick = () => go("list");
+  $("barIn").querySelectorAll("[data-r]").forEach((b) =>
+    b.addEventListener("click", () => go("detail", { race: Number(b.dataset.r) })));
+
+  const race = v.races[String(state.race)];
   const w = race.weather;
   const meta = [
     race.deadline ? `締切 ${race.deadline}` : "",
@@ -178,11 +328,11 @@ function render() {
       <td>${e.exh != null ? fmt(e.exh) : "-"}</td>
       <td>${e.course ?? "-"}</td>
       <td>${esc(e.st ?? "-")}</td>
-      <td class="${e.place === 1 ? "p1" : ""}">${e.place ?? esc(e.status ?? "-")}</td>
+      <td class="${e.place === 1 ? "p1" : ""}">${e.place ?? esc(statusText(e.status) || "-")}</td>
     </tr>`).join("");
 
   let pay = "";
-  if (race.payouts) {
+  if (race.payouts && Object.keys(race.payouts).length) {
     pay = '<div class="pay">' + BETS.filter((b) => race.payouts[b]).map((b) =>
       race.payouts[b].map((p, i) => `
         <span class="k">${i === 0 ? b : ""}</span><span>${p.combo}</span>
@@ -203,34 +353,15 @@ function render() {
     ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}`;
 }
 
-$("venues").addEventListener("click", (ev) => {
-  const b = ev.target.closest("button[data-v]");
-  if (!b || b.disabled) return;
-  state.venue = b.dataset.v;
-  store.set("venue", state.venue);
-  renderVenues(); render();
-});
-$("races").addEventListener("click", (ev) => {
-  const b = ev.target.closest("button[data-r]");
-  if (!b) return;
-  state.race = Number(b.dataset.r);
-  renderVenues(); render();
-});
-$("date").addEventListener("change", (ev) => ev.target.value && loadDay(ev.target.value));
-function step(dir) {
-  const list = dayList();
-  const cand = dir < 0 ? list.filter((d) => d < state.date).pop() : list.find((d) => d > state.date);
-  if (cand) loadDay(cand);
-}
-$("prev").addEventListener("click", () => step(-1));
-$("next").addEventListener("click", () => step(1));
 document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click", () => {
+  if (b.dataset.view === "race" && state.tab === "race") { go("home"); return; }
   document.querySelectorAll("nav button").forEach((x) => x.classList.toggle("on", x === b));
-  $("view-race").hidden = b.dataset.view !== "race";
-  $("view-venue").hidden = b.dataset.view !== "venue";
-  $("view-bets").hidden = b.dataset.view !== "bets";
-  document.querySelector("header").hidden = b.dataset.view !== "race";
-  if (b.dataset.view === "venue") renderVenue();
+  state.tab = b.dataset.view;
+  $("view-race").hidden = state.tab !== "race";
+  $("view-venue").hidden = state.tab !== "venue";
+  $("view-bets").hidden = state.tab !== "bets";
+  draw();
+  if (state.tab === "venue") renderVenue();
 }));
 
 // ---------------------------------------------------------------- 集計データ

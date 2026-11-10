@@ -110,7 +110,7 @@ def main():
                                         "c1", "c2", "c3", "c4", "c5", "c6")},
                 "f": 0, "last": "", "venues": {}})
             if e.get("name"):
-                rr["name"] = re.sub(r"[\s　]+", "", e["name"])
+                rr["name"] = e["name"]
             c = str(e["course"])
             add(rr["course"].setdefault(c, counter()), e.get("place"))
             oth = rr["others"].setdefault(c, {})

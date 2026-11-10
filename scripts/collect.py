@@ -154,7 +154,46 @@ def clean_name(s):
     return re.sub(r"[\s\u3000]+", " ", s).strip()
 
 
+def k_name(s):
+    """成績ファイルの選手名(1字ずつ空白入り、姓と名の間は2字分)を「姓 名」にする。"""
+    s = s.strip(" \u3000")
+    parts = s.split("\u3000\u3000", 1)
+    parts = [re.sub(r"[\s\u3000]+", "", x) for x in parts]
+    return " ".join(x for x in parts if x)
+
+
+NAMES = {}  # 登番 -> 正式な氏名(番組表は4文字で切れるため、成績ファイルの名前を使う)
+
+
+def load_names():
+    for p in sorted(glob.glob(os.path.join(DATA, "raw", "K", "*", "k*.all.txt.gz"))):
+        with gzip.open(p, "rt", encoding="utf-8") as f:
+            for line in f:
+                m = re.match(r"^ *[0-9A-Z]{1,2} +[1-6] +(\d{4}) +(.*?) +\d+ +\d+ ", line)
+                if m:
+                    NAMES[m.group(1)] = k_name(m.group(2))
+
+
 RACE_HEAD = re.compile(r"^\s*(\d{1,2})R\s+(.*?)\s+H(\d+)m\s*(.*)$")
+
+
+def parse_meta(lines):
+    """番組表の見出しから開催名と何日目かを取る。"""
+    meta = {}
+    after = False
+    for line in lines:
+        n = nk(line).strip()
+        if RACE_HEAD.match(nk(line)):
+            break
+        dm = re.search(r"第\s*(\d+)\s*日", n)
+        if dm and "day" not in meta:
+            meta["day"] = int(dm.group(1))
+        if "番組表" in n:
+            after = True
+            continue
+        if after and n and "title" not in meta:
+            meta["title"] = clean_name(n)
+    return meta
 
 
 def parse_program(lines):
@@ -228,7 +267,7 @@ def parse_results(lines):
                  "place": int(pos) if pos.isdigit() else None, "status": None if pos.isdigit() else pos}
             if rest:
                 t = rest.group(4).split()
-                e.update({"name": clean_name(rest.group(1)), "motor_no": int(rest.group(2)),
+                e.update({"name": k_name(rest.group(1)), "motor_no": int(rest.group(2)),
                           "boat_no": int(rest.group(3)),
                           "exh": num(t[0]) if len(t) > 0 else None,
                           "course": num(t[1], int) if len(t) > 1 else None,
@@ -257,8 +296,10 @@ def day_path(d):
     return os.path.join(DATA, "races", f"{d:%Y}", f"{d:%Y%m%d}.json")
 
 
-def merge(day, code, prog, res):
+def merge(day, code, prog, res, meta=None):
     v = day["venues"].setdefault(code, {"name": VENUES[code], "races": {}})
+    if meta:
+        v.update(meta)
     for no in sorted(set(prog) | set(res)):
         p, r = prog.get(no, {}), res.get(no, {})
         race = v["races"].get(str(no), {"no": no})
@@ -277,10 +318,12 @@ def merge(day, code, prog, res):
                 e.update(p["entries"][b])
             if b in r.get("entries", {}):
                 rr = dict(r["entries"][b])
-                for k in ("name", "motor_no", "boat_no"):
+                for k in ("motor_no", "boat_no"):
                     if e.get(k) is not None:
                         rr.pop(k, None)
                 e.update(rr)
+            if e.get("regno") in NAMES:
+                e["name"] = NAMES[e["regno"]]
             if len(e) > 1:
                 ents[b] = e
         race["entries"] = [ents[b] for b in sorted(ents)]
@@ -304,7 +347,10 @@ def process(d, reparse):
         prog = parse_program(bs[code]) if code in bs else {}
         res = parse_results(ks[code]) if code in ks else {}
         if prog or res:
-            merge(day, code, prog, res)
+            meta = parse_meta(bs[code]) if code in bs else {}
+            if any(re.search(r"(?<!準)優勝戦", r.get("name", "")) for r in prog.values()):
+                meta["final"] = True
+            merge(day, code, prog, res, meta)
     if not day["venues"]:
         return None
     day["has_results"] = any(
@@ -345,6 +391,7 @@ def main():
     end = dt.datetime.strptime(a.end, "%Y%m%d").date() if a.end.strip() else today
     if end < start:
         start, end = end, start
+    load_names()
     d = start
     while d <= end:
         if time.time() - t0 > a.max_minutes * 60:
