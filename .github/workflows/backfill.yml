@@ -15,6 +15,9 @@ on:
       end:
         description: "終了日 YYYYMMDD"
         default: "20251109"
+      results_only:
+        description: "成績ファイルだけ取る(false なら番組表も取る)"
+        default: "true"
 
 permissions:
   contents: write
@@ -46,7 +49,7 @@ jobs:
       - name: 成績ファイルのまとめ取り
         run: |
           python -u scripts/collect.py --start "${{ inputs.start || '20231110' }}" --end "${{ inputs.end || '20251109' }}" \
-            --results-only --workers 3 --max-minutes 300
+            ${{ inputs.results_only == 'false' && ' ' || '--results-only' }} --workers 3 --max-minutes 300
 
       - name: 出目確率の重みを作り直す
         run: python scripts/model.py --force
