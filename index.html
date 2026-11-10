@@ -59,6 +59,13 @@
   .cell .tt { font-size: 11px; color: var(--sub); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .cell.off { background: var(--cell-off); cursor: default; }
   .cell.off .vn { color: #b0b8c3; }
+  .cell { position: relative; }
+  .gbr { position: absolute; top: 0; left: 0; display: flex; align-items: center; gap: 4px; }
+  .gb { display: inline-block; font-size: 13px; font-weight: 800; padding: 3px 8px; color: #fff; border-radius: 0 0 6px 0; }
+  .bar h1 .gb { border-radius: 4px; vertical-align: middle; font-size: 13px; }
+  .gip { background: #8c9bb5; } .gg3 { background: #4dabf7; } .gg2 { background: #20c997; }
+  .gg1 { background: #f59f00; } .gsg { background: #c92a2a; }
+  .gt { font-size: 15px; }
   .night { display: inline-block; background: #d0bfff; color: #3b2a8a; border-radius: 4px; padding: 1px 5px; font-size: 13px; }
   .tag { display: inline-block; font-size: 12px; font-weight: 700; padding: 2px 8px; border-radius: 4px; background: #e9ecef; color: #6b7684; }
   .tag.final { background: #ffe8cc; color: #d9480f; }
@@ -253,6 +260,12 @@ function venueStatus(v) {
   const next = races.find((r) => r.deadline && r.deadline > now.time && !r.payouts);
   return next ? { text: `${next.no}R ${next.deadline}`, done: false } : { text: "開催終了", done: true };
 }
+function gradeBadge(v) {
+  if (!v.grade) return "";
+  const cls = { SG: "gsg", G1: "gg1", G2: "gg2", G3: "gg3" }[v.grade] || "gip";
+  const t = { "ヴィーナス": "💗", "ルーキー": "🔰", "レディース": "👩", "マスターズ": "🎖" }[v.gtype] || "";
+  return `<span class="gb ${cls}">${esc(v.grade)}</span>${t ? `<span class="gt" title="${esc(v.gtype)}">${t}</span>` : ""}`;
+}
 function dayText(v) {
   if (v.final) return '<span class="tag final">最終日</span>';
   if (v.day === 1) return "初日";
@@ -279,6 +292,7 @@ function drawHome() {
     if (!v) return `<div class="cell off"><div class="vn">${esc(name)}</div></div>`;
     const s = venueStatus(v);
     return `<button class="cell" data-v="${code}">
+      <div class="gbr">${gradeBadge(v)}</div>
       <div class="vn">${esc(name)}</div>
       <div class="dl">${dayText(v)}${NIGHT.includes(code) ? '<span class="night">🌙</span>' : ""}</div>
       <div class="st ${s.done ? "done" : ""}">${s.text}</div>
@@ -296,7 +310,7 @@ function drawList() {
   const v = state.day.venues[state.venue];
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ 場選択</button>
-    <h1>${esc(v.name)} <span style="font-size:15px;font-weight:600">${dateLabel(state.date)}</span></h1>
+    <h1>${gradeBadge(v)} ${esc(v.name)} <span style="font-size:15px;font-weight:600">${dateLabel(state.date)}</span></h1>
     <div class="sub">${esc(v.title || "")} ${v.final ? "・最終日" : v.day ? `・${v.day === 1 ? "初日" : v.day + "日目"}` : ""}</div>`;
   $("back").onclick = () => go("home");
 
@@ -420,6 +434,8 @@ function lane(e) {
     <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.boat}">${esc(e.name || "")}</span>
       ${e.class ? `<br><span class="cls ${e.class}">${e.class}</span>` : ""}</td>`;
 }
+const GRADE_OPTS = [["all", "総合"], ["ippan", "一般戦"], ["jushou", "重賞(SG〜G3)"]];
+state.g = "all";
 function chipRow(id, opts, cur) {
   return `<div class="seg" id="${id}">${opts.map(([k, l]) => `<button data-p="${k}" class="pill2 ${k === cur ? "on" : ""}">${l}</button>`).join("")}</div>`;
 }
@@ -434,8 +450,10 @@ async function drawRacerTab(v, race) {
   const pick = (r, period, c) => {
     if (!r || !r.bycourse) return null;
     if (period === "local") return r.bycourse.local?.[state.venue]?.[c] || null;
-    return r.bycourse[period]?.[c] || null;
+    const key = state.g !== "all" && (period === "6m" || period === "1y") ? `${period}_${state.g}` : period;
+    return r.bycourse[key]?.[c] || null;
   };
+  const gNote = state.g !== "all" ? `<div class="note">グレードの切り替えは、直近6ヶ月と直近1年に効きます。</div>` : "";
   // 枠別着率(枠番=コースとして、その選手がそのコースで走ったときの成績)
   const rows = race.entries.map((e, i) => ({ e, b: pick(files[i], state.rp, String(e.boat)) }));
   const cols = [
@@ -475,13 +493,15 @@ async function drawRacerTab(v, race) {
   $("view-race").innerHTML = `
     <div class="card">
       <h2>枠別着率</h2>
-      ${chipRow("rp", [["10", "直近10走"], ["6m", "直近6ヶ月"], ["1y", "直近1年"], ["local", "当地"]], state.rp)}
+      ${chipRow("rg", GRADE_OPTS, state.g)}
+      ${chipRow("rp", [["10", "直近10走"], ["6m", "直近6ヶ月"], ["1y", "直近1年"], ["local", "当地"]], state.rp)}${gNote}
       <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>3連対率</th><th>1着率</th><th>2着率</th><th>3着率</th></tr></thead>
         <tbody>${t1}</tbody></table></div>
       <div class="note">それぞれの選手が、この枠と同じコースで走ったときの成績です（直近10走はそのコースでの直近10回）。当地は${esc(v.name)}での直近1年。</div>
     </div>
     <div class="card">
       <h2>決まり手率</h2>
+      ${chipRow("kg", GRADE_OPTS, state.g)}
       ${chipRow("kp", [["6m", "直近6ヶ月"], ["1y", "直近1年"]], state.kp)}
       <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>逃げ</th><th>差され</th><th>まくられ</th><th>まくられ差</th></tr></thead>
         <tbody>${t2a}</tbody></table></div>
@@ -489,6 +509,7 @@ async function drawRacerTab(v, race) {
         <tbody>${t2b}</tbody></table></div>
       <div class="note">1号艇は1コースで走ったとき、逃げ切った率と、差し・まくり・まくり差しで負けた率。2〜6号艇はそのコースで、差し・まくり・まくり差しで勝った率。逃しは2コースで1コースに逃げられた率。</div>
     </div>`;
+  ["rg", "kg"].forEach((id) => $(id).querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; drawRacerTab(v, race); }));
   $("rp").querySelectorAll("button").forEach((b) => b.onclick = () => { state.rp = b.dataset.p; drawRacerTab(v, race); });
   $("kp").querySelectorAll("button").forEach((b) => b.onclick = () => { state.kp = b.dataset.p; drawRacerTab(v, race); });
 }
@@ -624,7 +645,8 @@ async function renderVenue() {
     box.innerHTML = '<div class="empty">集計データがまだありません。</div>'; return;
   }
   const code = state.venue && vs.venues[state.venue] ? state.venue : Object.keys(vs.venues)[0];
-  const v = vs.venues[code];
+  const vv = vs.venues[code];
+  const v = { name: vv.name, ...(vv[state.g] || vv.all) };
   const seg = Object.entries(vs.venues).map(([c, x]) =>
     `<button data-sv="${c}" class="${c === code ? "on" : ""}">${esc(x.name)}</button>`).join("");
   const crow = [1, 2, 3, 4, 5, 6].map((c) => {
@@ -642,8 +664,9 @@ async function renderVenue() {
       <td>${r.man_rate ?? "-"}%</td><td>${r.fav_rate ?? "-"}%</td></tr>`).join("");
   box.innerHTML = `
     <div class="seg">${seg}</div>
+    ${chipRow("vg", GRADE_OPTS, state.g)}
     <div class="card"><h2>${esc(v.name)} コース別成績</h2>
-      <div class="meta"><span>${vs.period.from}〜${vs.period.to}</span></div>
+      <div class="meta"><span>${vs.period.from}〜${vs.period.to}</span><span>${GRADE_OPTS.find((x) => x[0] === state.g)[1]}</span></div>
       <div class="tbl"><table><thead><tr><th>コース</th><th>出走</th><th>1着</th><th>2着</th><th>3着</th>
         <th>1着率</th><th>2連対率</th><th>3連対率</th><th>主な決まり手</th></tr></thead><tbody>${crow}</tbody></table></div>
     </div>
@@ -654,6 +677,7 @@ async function renderVenue() {
         <tbody>${rrow}</tbody></table></div>
       <div class="note">平均は高配当に引っぱられるので、ふだんの配当の目安は中央値を見てください。</div>
     </div>`;
+  $("vg").querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; renderVenue(); });
   box.querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => {
     state.venue = b.dataset.sv; store.set("venue", state.venue); renderVenue();
   }));
@@ -668,23 +692,25 @@ async function openRacer(regno, course) {
     $("mclose").onclick = closeModal; return;
   }
   const draw = (c) => {
-    const own = r.course[c] || { n: 0, p1: 0, p2: 0, p3: 0 };
+    const sh = r.sheet[state.g] || r.sheet.all;
+    const own = sh.course[c] || { n: 0, p1: 0, p2: 0, p3: 0 };
     const rows = [1, 2, 3, 4, 5, 6].map((k) => {
-      const x = k === c ? own : (r.others[c]?.[k] || { n: 0, p1: 0, p2: 0, p3: 0 });
+      const x = k === c ? own : (sh.others[c]?.[k] || { n: 0, p1: 0, p2: 0, p3: 0 });
       return `<tr class="${k === c ? "own" : ""}"><td>${k}コース<br><small>${k === c ? "(自艇)" : "(他艇)"}</small></td>
         <td>${x.n}</td><td>${x.p1}</td><td>${x.p2}</td><td>${x.p3}</td>
         <td>${pct(x.p1, x.n)}</td><td>${pct(x.p2, x.n)}</td><td>${pct(x.p3, x.n)}</td></tr>`;
     }).join("");
     const seg = [1, 2, 3, 4, 5, 6].map((k) =>
-      `<button data-c="${k}" class="${k === c ? "on" : ""}">${k}コース(${r.course[k]?.n || 0})</button>`).join("");
+      `<button data-c="${k}" class="${k === c ? "on" : ""}">${k}コース(${sh.course[k]?.n || 0})</button>`).join("");
     const stRows = [["total", "全体"], ["c1", "1コース"], ["c2", "2コース"], ["c3", "3コース"], ["c4", "4コース"],
       ["c5", "5コース"], ["c6", "6コース"], ["slow", "スロー(1〜3)"], ["dash", "ダッシュ(4〜6)"], ["day", "デイ"], ["night", "ナイター"]]
-      .map(([k, label]) => `<tr><td style="text-align:left">${label}</td><td>${r.st[k].avg != null ? r.st[k].avg.toFixed(2) : "-"}</td><td>${r.st[k].n}</td></tr>`).join("");
-    const total = Object.values(r.course).reduce((a, x) => a + x.n, 0);
+      .map(([k, label]) => `<tr><td style="text-align:left">${label}</td><td>${sh.st[k].avg != null ? sh.st[k].avg.toFixed(2) : "-"}</td><td>${sh.st[k].n}</td></tr>`).join("");
+    const total = Object.values(sh.course).reduce((a, x) => a + x.n, 0);
     $("sheet").innerHTML = `
       <button class="close" id="mclose">閉じる</button>
       <h2>${esc(r.name)} <small style="color:var(--sub)">${r.regno}</small></h2>
-      <div class="meta"><span>${r.period.from}〜${r.period.to}</span><span>出走 ${total}</span><span>F ${r.f}回</span></div>
+      <div class="meta"><span>${r.period.from}〜${r.period.to}</span><span>出走 ${total}</span><span>F ${sh.f}回</span></div>
+      ${chipRow("sg", GRADE_OPTS, state.g)}
       <div class="card" style="margin-top:10px"><h2>コース別全艇成績</h2>
         <div class="seg">${seg}</div>
         <div class="tbl"><table><thead><tr><th>コース</th><th>出走</th><th>1着</th><th>2着</th><th>3着</th>
@@ -698,6 +724,7 @@ async function openRacer(regno, course) {
       <div class="note">出走場: ${Object.entries(r.venues).map(([k, n]) => `${esc(k)}${n}`).join("・")}</div>`;
     $("mclose").onclick = closeModal;
     $("sheet").querySelectorAll("[data-c]").forEach((b) => b.addEventListener("click", () => draw(Number(b.dataset.c))));
+    $("sg").querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; draw(c); });
   };
   draw(Number(course) || 1);
 }

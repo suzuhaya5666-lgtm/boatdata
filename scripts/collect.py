@@ -162,6 +162,18 @@ def k_name(s):
     return " ".join(x for x in parts if x)
 
 
+def load_grades():
+    """data/grades の月ファイルから {(場コード, 'YYYY-MM-DD'): {"grade", "type", "title"}} を作る。"""
+    g = {}
+    for p in sorted(glob.glob(os.path.join(DATA, "grades", "*.json"))):
+        with open(p, encoding="utf-8") as f:
+            for code, days in json.load(f).items():
+                for date, info in days.items():
+                    g[(code, date)] = info
+    return g
+
+
+GRADES = {}
 NAMES = {}  # 登番 -> 正式な氏名(番組表は4文字で切れるため、成績ファイルの名前を使う)
 
 
@@ -350,6 +362,9 @@ def process(d, reparse):
             meta = parse_meta(bs[code]) if code in bs else {}
             if any(re.search(r"(?<!準)優勝戦", r.get("name", "")) for r in prog.values()):
                 meta["final"] = True
+            g = GRADES.get((code, f"{d:%Y-%m-%d}"))
+            if g:
+                meta["grade"], meta["gtype"] = g["grade"], g["type"]
             merge(day, code, prog, res, meta)
     if not day["venues"]:
         return None
@@ -392,6 +407,7 @@ def main():
     if end < start:
         start, end = end, start
     load_names()
+    GRADES.update(load_grades())
     d = start
     while d <= end:
         if time.time() - t0 > a.max_minutes * 60:
