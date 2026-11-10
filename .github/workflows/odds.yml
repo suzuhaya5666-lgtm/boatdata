@@ -42,4 +42,4 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python -u scripts/odds.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes "${{ inputs.minutes || '330' }}" --push-every 200 --verbose
+          python -u scripts/odds.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes "${{ inputs.minutes || '330' }}" --push-every 150
