@@ -344,7 +344,7 @@ def merge(day, code, prog, res, meta=None):
         v["races"][str(no)] = race
 
 
-def process(d, reparse):
+def process(d, reparse, results_only=False):
     p = day_path(d)
     if os.path.exists(p):
         with open(p, encoding="utf-8") as f:
@@ -352,7 +352,7 @@ def process(d, reparse):
     else:
         day = {"date": f"{d:%Y-%m-%d}", "venues": {}}
     kt, k_new = load_raw("K", d, reparse)
-    bt, b_new = load_raw("B", d, reparse)
+    bt, b_new = (None, False) if results_only else load_raw("B", d, reparse)
     if kt is None and bt is None:
         return None
     ks = sections(kt, "K") if kt else {}
@@ -401,6 +401,8 @@ def main():
     ap.add_argument("--end", default="")
     ap.add_argument("--reparse", action="store_true")
     ap.add_argument("--max-minutes", type=float, default=100)
+    ap.add_argument("--results-only", action="store_true", help="成績ファイルだけ取る(過去分のまとめ取り用)")
+    ap.add_argument("--workers", type=int, default=1, help="同時に取るファイル数(公式の応答が1回約8秒のため)")
     a = ap.parse_args()
     t0 = time.time()
     today = dt.datetime.now(JST).date()
@@ -408,6 +410,37 @@ def main():
     end = dt.datetime.strptime(a.end, "%Y%m%d").date() if a.end.strip() else today
     if end < start:
         start, end = end, start
+    # まとめ取り: 先にファイルだけ並行して取って保存しておく(解析はそのあと順番に)
+    if a.workers > 1 and not a.reparse:
+        from concurrent.futures import ThreadPoolExecutor
+        kinds = ["K"] if a.results_only else ["K", "B"]
+        todo = []
+        d = start
+        while d <= end:
+            for kind in kinds:
+                saved = os.path.exists(raw_all_path(d)) if kind == "K" else os.path.exists(raw_path(kind, d))
+                if not saved:
+                    todo.append((kind, d))
+            d += dt.timedelta(days=1)
+        print(f"取得するファイル {len(todo)}件", flush=True)
+        done = 0
+
+        def fetch_one(item):
+            if time.time() - t0 > a.max_minutes * 60:
+                return False
+            try:
+                load_raw(item[0], item[1], False)
+            except Exception as e:
+                print(f"{item[1]:%Y-%m-%d} {item[0]}: 失敗 {e}", flush=True)
+            return True
+
+        with ThreadPoolExecutor(max_workers=a.workers) as ex:
+            for ok in ex.map(fetch_one, todo):
+                done += ok
+                if done and done % 100 == 0:
+                    print(f"  {done}/{len(todo)}件", flush=True)
+        if done < len(todo):
+            print(f"時間切れ: {done}/{len(todo)}件。もう一度実行すると続きから取ります。")
     load_names()
     GRADES.update(load_grades())
     d = start
@@ -416,7 +449,7 @@ def main():
             print(f"時間切れのため {d:%Y-%m-%d} の手前で終了。もう一度実行すると続きから取ります。")
             break
         try:
-            process(d, a.reparse)
+            process(d, a.reparse or a.workers > 1, a.results_only)
         except Exception as e:  # 1日失敗しても続ける
             print(f"{d:%Y-%m-%d}: 失敗 {e}", file=sys.stderr)
         d += dt.timedelta(days=1)

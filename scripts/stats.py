@@ -8,6 +8,7 @@
 グレード区分(重ならない): ippan=一般戦(男女混合), g2g3=G2・G3, sgg1=SG・G1, women=女子戦(ヴィーナス・オールレディース)
 all=総合 はすべて
 """
+import collections
 import datetime as dt
 import glob
 import gzip
@@ -209,6 +210,8 @@ def bucket(recs):
 
 def bycourse(recs, last):
     six = last - dt.timedelta(days=182)
+    year = last - dt.timedelta(days=365)
+    recs = [r for r in recs if r[0] > year]  # 選手の成績は直近1年(過去分を多く取り込んでも変わらない)
     out = {k: {} for k in ("10", "6m", "1y", "local")}
     for c in range(1, 7):
         rc = [r for r in recs if r[2] == c]
@@ -299,14 +302,19 @@ def main():
                 motors.setdefault(code, {}).setdefault(e["motor_no"], []).append(
                     (date, POINTS.get(e.get("place"), 0), e.get("place")))
 
-    # ---- 選手
+    # ---- 選手(直近1年)
+    year_ago = last - dt.timedelta(days=365)
+    rperiod = {**period, "from": (year_ago + dt.timedelta(days=1)).isoformat()}
     for regno, recs in hist.items():
-        rr = {"regno": regno, "name": names.get(regno, ""), "period": period,
+        recs1y = [r for r in recs if r[0] > year_ago]
+        if not recs1y:
+            continue  # 直近1年に走っていない選手は作らない
+        rr = {"regno": regno, "name": names.get(regno, ""), "period": rperiod,
               "last": recs[-1][0].isoformat(),
-              "venues": {ALL_VENUES.get(k, k): n for k, n in sorted(venues_count[regno].items(), key=lambda x: -x[1])},
-              "female": any(r[7] == "women" for r in recs),
+              "venues": {ALL_VENUES.get(k, k): n for k, n in sorted(collections.Counter(r[1] for r in recs1y).items(), key=lambda x: -x[1])},
+              "female": any(r[7] == "women" for r in recs1y),
               "sheet": {cat: sheet(rs) for cat in CATS
-                        for rs in [[r for r in recs if in_cat(cat, r[7])]] if rs},
+                        for rs in [[r for r in recs1y if in_cat(cat, r[7])]] if rs},
               "bycourse": bycourse(recs, last)}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:
             json.dump(rr, f, ensure_ascii=False, separators=(",", ":"))

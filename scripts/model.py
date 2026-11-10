@@ -56,7 +56,7 @@ def build():
     by_day = collections.defaultdict(list)
     for r in races:
         by_day[r[0]].append(r)
-    X, N, P, Y, F = [], [], [], [], []
+    X, N, P, Y, F, H = [], [], [], [], [], []
     for day in sorted(by_day):
         if day >= first + dt.timedelta(days=WARMUP_DAYS):
             for _, code, race, ents in by_day[day]:
@@ -88,6 +88,7 @@ def build():
                             b["motor_2"] if b.get("motor_2") is not None else np.nan,
                             CLS.get(b.get("class"), np.nan), st[0] / st[1] if st[1] else np.nan]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
+                H.append(bool(de))  # 出走表(勝率・モーターなど)があるレースか
         for _, code, race, ents in by_day[day]:
             for e in ents:
                 c, p = e["course"], e.get("place")
@@ -107,7 +108,7 @@ def build():
                         oo[0] += 1
                         if o.get("place") in (1, 2, 3):
                             oo[o["place"]] += 1
-    return np.array(X), np.array(N), np.array(P), np.array(Y), np.array(F), races[0][0], races[-1][0]
+    return np.array(X), np.array(N), np.array(P), np.array(Y), np.array(F), np.array(H), races[0][0], races[-1][0]
 
 
 def fit(X, N, P, Y):
@@ -239,14 +240,17 @@ def main():
             if json.load(f).get("month") == f"{today:%Y-%m}":
                 print("今月の重みは作成済み")
                 return
-    X, N, P, Y, F, first, last = build()
-    W, losses = fit(X, N, P, Y)
-    Z, sd = standardize(F)
+    X, N, P, Y, F, H, first, last = build()
+    W, losses = fit(X, N, P, Y)  # コース別成績の重みは全期間で
+    prog = np.where(H)[0]        # 材料の係数は、出走表があるレースだけで決める
+    Zp, sd = standardize(F[prog])
+    Z = np.zeros((len(Y), 7, len(FEATURES)))
+    Z[prog] = Zp
     LQ = base_lq(X, N, P, W)
-    # 検証用: 古い6割で決めて、新しい4割で確かめる
-    cut = int(len(Y) * 0.6)
-    tr, te = np.arange(cut), np.arange(cut, len(Y))
-    W_tr, _ = fit(X[tr], N[tr], P[tr], Y[tr])
+    # 検証用: 出走表があるレースの古い6割で決めて、新しい4割で確かめる
+    cut = int(len(prog) * 0.6)
+    tr, te = prog[:cut], prog[cut:]
+    W_tr, _ = fit(X[:prog[cut]], N[:prog[cut]], P[:prog[cut]], Y[:prog[cut]])
     LQ_tr = base_lq(X, N, P, W_tr)
     combos = {}
     nfeat = len(FEATURES)
@@ -255,7 +259,7 @@ def main():
         use_cb = bool(mask >> nfeat & 1)
         c_tr, b_tr = fit_logit(LQ_tr, Z, Y, feats, use_cb, rows=tr)
         ev = evaluate(LQ_tr, Z, Y, c_tr, b_tr, te)
-        c_all, b_all = fit_logit(LQ, Z, Y, feats, use_cb)
+        c_all, b_all = fit_logit(LQ, Z, Y, feats, use_cb, rows=prog)
         combos[str(mask)] = {"coef": c_all, "cbias": b_all, "eval": ev}
         print(f"組み合わせ {mask:3d}: {ev}")
     full = combos[str((1 << (nfeat + 1)) - 1)]
@@ -267,7 +271,7 @@ def main():
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)),
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
-    print(f"重みを作成: {len(Y)}レース、組み合わせ {len(combos)}通り")
+    print(f"重みを作成: {len(Y)}レース(材料の係数は {len(prog)}レース)、組み合わせ {len(combos)}通り")
 
 
 if __name__ == "__main__":

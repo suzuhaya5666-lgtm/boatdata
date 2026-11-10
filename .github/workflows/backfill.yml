@@ -1,0 +1,67 @@
+name: backfill
+
+# 過去分のまとめ取り(成績ファイルだけ、3つ同時)。取得済みは飛ばすので、何度動いても続きから。
+on:
+  schedule:
+    # 2026/11/11 の 4:03・4:33・5:03(日本時間)。どれかが飛ばされても残りで動く
+    - cron: "3 19 10 11 *"
+    - cron: "33 19 10 11 *"
+    - cron: "3 20 10 11 *"
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "開始日 YYYYMMDD"
+        default: "20231110"
+      end:
+        description: "終了日 YYYYMMDD"
+        default: "20251109"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: backfill
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 解凍ソフトとライブラリ
+        run: |
+          which 7z || sudo apt-get install -y p7zip-full
+          pip install --quiet numpy scipy
+
+      - name: グレード(2023年11月から)
+        run: python scripts/grades.py --since 202311
+
+      - name: 成績ファイルのまとめ取り
+        run: |
+          python -u scripts/collect.py --start "${{ inputs.start || '20231110' }}" --end "${{ inputs.end || '20251109' }}" \
+            --results-only --workers 3 --max-minutes 300
+
+      - name: 出目確率の重みを作り直す
+        run: python scripts/model.py --force
+
+      - name: 保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -q -m "過去分の取り込み $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
+            for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
+            gh workflow run pages.yml   # 公開し直す(場データ・選手成績の集計もここで作られる)
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}

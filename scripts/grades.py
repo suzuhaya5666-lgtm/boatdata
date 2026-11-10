@@ -67,7 +67,12 @@ def months(start, end):
 
 def main():
     today = dt.datetime.now(JST).date()
-    start = dt.date(today.year - 1, today.month, 1)
+    # --since YYYYMM で、それより前の月も取る(過去分のまとめ取り用)
+    if "--since" in sys.argv:
+        ym = sys.argv[sys.argv.index("--since") + 1]
+        start = dt.date(int(ym[:4]), int(ym[4:6]), 1)
+    else:
+        start = dt.date(today.year - 1, today.month, 1)
     nxt = (today.replace(day=1) + dt.timedelta(days=32)).replace(day=1)
     os.makedirs(os.path.join(DATA, "grades"), exist_ok=True)
     for y, m in months(start, nxt):
