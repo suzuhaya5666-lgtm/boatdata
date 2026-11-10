@@ -155,7 +155,11 @@
   table.grid2 .v.sub { font-size: 13px; color: #495057; margin-top: 2px; }
   .v.pk { background: #ffc9de; } .v.ye { background: #fff3bf; }
   .red { color: #e03131; font-weight: 800; }
-  .meet { display: flex; gap: 3px; align-items: stretch; }
+  .meet { display: flex; align-items: stretch; }
+  .mday { display: flex; flex-direction: column; padding: 0 4px; border-left: 2px solid #868e96; }
+  .mday:first-child { border-left: none; padding-left: 0; }
+  .mdl { font-size: 11px; color: var(--sub); text-align: center; margin-bottom: 2px; white-space: nowrap; }
+  .mrs { display: flex; gap: 3px; }
   .mr { display: flex; flex-direction: column; align-items: center; min-width: 34px; font-size: 12px; line-height: 1.5; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
   .mh { width: 100%; text-align: center; font-weight: 800; font-size: 11px; }
   .msep { width: 2px; background: #adb5bd; margin: 0 2px; }
@@ -167,6 +171,12 @@
   .hitc { background: #b2f2bb !important; font-weight: 800; }
   .ogrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 4px; }
   .oi { display: flex; justify-content: space-between; align-items: center; border: 1px solid var(--line); border-radius: 4px; padding: 2px 5px; font-size: 13px; }
+  .ogrid .oi:nth-child(odd) { background: #f6f8fb; }
+  .oblk { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; gap: 0 !important; }
+  .oblk .obh { background: #eef2f7; padding: 4px 6px; border-bottom: 1px solid #ced4da; }
+  .oblk .oi { border: none; border-radius: 0; border-bottom: 1px solid var(--line); padding: 3px 6px; }
+  .oblk .oi:nth-child(even) { background: #f6f8fb; }
+  .oblk .oi:nth-child(4n+1) { border-bottom: 1px solid #adb5bd; }
   .oi .mini { width: 18px; height: 18px; line-height: 18px; font-size: 11px; margin-right: 1px; }
   .o3 { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 6px; }
   .oblk { display: flex; flex-direction: column; gap: 3px; }
@@ -516,15 +526,18 @@ async function meetHistory(race) {
 }
 function meetCell(list) {
   if (!list?.length) return '<span class="cnt">-</span>';
-  let html = "", lastDate = "";
+  // 日ごとにまとめて、日の名前(初日・○日目・最終日)を付ける
+  const days = [];
   list.forEach((h) => {
-    if (h.date !== lastDate && lastDate) html += '<span class="msep"></span>';
-    lastDate = h.date;
-    const pl = h.place ? h.place : statusText(h.status);
-    html += `<span class="mr"><span class="mh k${h.boat}">${h.no}R</span><span>${h.course ?? "-"}</span>
-      <span class="cnt">${esc((h.st || "").replace(/^0/, ""))}</span><b class="${h.place === 1 ? "p1" : h.place && h.place <= 3 ? "p23" : ""}">${esc(pl)}</b></span>`;
+    if (!days.length || days[days.length - 1].date !== h.date) days.push({ date: h.date, dayNo: h.dayNo, final: h.final, races: [] });
+    days[days.length - 1].races.push(h);
   });
-  return `<div class="meet">${html}</div>`;
+  const label = (d) => d.final ? "最終日" : d.dayNo === 1 ? "初日" : d.dayNo ? `${d.dayNo}日目` : d.date.slice(5).replace("-", "/");
+  return `<div class="meet">${days.map((d) => `<div class="mday"><div class="mdl">${label(d)}</div><div class="mrs">${d.races.map((h) => {
+    const pl = h.place ? h.place : statusText(h.status);
+    return `<span class="mr"><span class="mh k${h.boat}">${h.no}R</span><span>${h.course ?? "-"}</span>
+      <span class="cnt">${esc((h.st || "").replace(/^0/, ""))}</span><b class="${h.place === 1 ? "p1" : h.place && h.place <= 3 ? "p23" : ""}">${esc(pl)}</b></span>`;
+  }).join("")}</div></div>`).join("")}</div>`;
 }
 
 // ---------------------------------------------------------------- 結果
