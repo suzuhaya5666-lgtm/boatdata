@@ -1,9 +1,12 @@
 name: before
 
-# 直前情報: レース開催中(8:00〜22:00 日本時間)は10分ごとに、締切が近いレースだけ取りに行く
+# 直前情報: 1日3回起動し、それぞれ最大5時間半、5分ごとに締切が近いレースの直前情報を取る。
+# (10分ごとの定期実行は GitHub 側で飛ばされることが多かったため、この形にしている)
 on:
   schedule:
-    - cron: "*/10 23,0-12 * * *"
+    - cron: "47 22 * * *"   # 7:47(日本時間)
+    - cron: "17 4 * * *"    # 13:17
+    - cron: "47 9 * * *"    # 18:47
   workflow_dispatch:
 
 permissions:
@@ -16,7 +19,7 @@ concurrency:
 jobs:
   before:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 345
     steps:
       - uses: actions/checkout@v4
 
@@ -24,18 +27,8 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: 直前情報の取得
-        run: python scripts/before.py
-
-      - name: 保存
+      - name: 直前情報の取得(5分ごと)
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/before 2>/dev/null || true
-          if git diff --cached --quiet; then
-            echo "変更なし"
-          else
-            git commit -m "直前情報 $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
-            git pull --rebase
-            git push
-          fi
+          python -u scripts/before.py --loop 330

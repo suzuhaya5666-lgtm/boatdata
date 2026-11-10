@@ -8,6 +8,7 @@ import datetime as dt
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.request
@@ -76,23 +77,27 @@ def complete(info):
     return len(info["entries"]) == 6 and all(e["exh"] is not None for e in ents if e.get("weight"))
 
 
-def main():
+def fetch_once():
+    """締切が近いレースの直前情報を取る。戻り値: (保存件数, 今日のまだ終わっていないレースがあるか)"""
     now = dt.datetime.now(JST)
     today = now.date()
     day_path = os.path.join(DATA, "races", f"{today:%Y}", f"{today:%Y%m%d}.json")
     if not os.path.exists(day_path):
         print("今日の出走表がまだありません")
-        return
+        return 0, now.hour < 12  # 朝の出走表取り込み前なら待つ
     with open(day_path, encoding="utf-8") as f:
         day = json.load(f)
     outdir = os.path.join(DATA, "before", f"{today:%Y%m%d}")
     got = 0
+    remaining = False
     for code, v in day["venues"].items():
         for no, race in sorted(v["races"].items(), key=lambda x: int(x[0])):
             if not race.get("deadline"):
                 continue
             hh, mm = map(int, race["deadline"].split(":"))
             dl = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if now <= dl + dt.timedelta(minutes=AFTER_MIN):
+                remaining = True
             if not (dl - dt.timedelta(minutes=BEFORE_MIN) <= now <= dl + dt.timedelta(minutes=AFTER_MIN)):
                 continue
             path = os.path.join(outdir, f"{code}_{int(no):02d}.json")
@@ -119,7 +124,48 @@ def main():
                 json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
             got += 1
             print(f"{VENUES[code]}{no}R: 保存" + ("" if info["complete"] else "(途中)"))
-    print(f"直前情報 {got}件")
+    print(f"{now:%H:%M} 直前情報 {got}件")
+    return got, remaining
+
+
+def push():
+    """取れた分をすぐ GitHub に保存する(画面はリポジトリから直接読む)。"""
+    def run(*a):
+        return subprocess.run(list(a), capture_output=True, text=True)
+    run("git", "add", os.path.join(DATA, "before"))
+    if run("git", "diff", "--cached", "--quiet").returncode == 0:
+        return
+    run("git", "commit", "-m", f"直前情報 {dt.datetime.now(JST):%Y-%m-%d %H:%M}")
+    for _ in range(3):
+        run("git", "pull", "--rebase", "-q")
+        if run("git", "push", "-q").returncode == 0:
+            return
+        time.sleep(5)
+    print("保存に失敗(次の回でまとめて保存します)")
+
+
+def main():
+    # --loop 分: 指定した時間まで5分ごとに取り続ける(GitHub の定期実行は遅れたり飛んだりするため)
+    if "--loop" not in sys.argv:
+        fetch_once()
+        return
+    limit = float(sys.argv[sys.argv.index("--loop") + 1])
+    start = time.time()
+    while True:
+        try:
+            _, remaining = fetch_once()
+            push()
+        except Exception as e:  # 1回失敗しても続ける
+            print(f"失敗 {e}")
+            remaining = True
+        if not remaining:
+            print("今日のレースは終わりました")
+            break
+        if time.time() - start > limit * 60:
+            print("時間になったので終了(次の実行に引き継ぎ)")
+            break
+        time.sleep(300)
+
 
 
 if __name__ == "__main__":

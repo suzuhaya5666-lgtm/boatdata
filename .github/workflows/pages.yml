@@ -5,7 +5,7 @@ on:
   push:
     branches: [main]
   workflow_run:
-    workflows: [collect, before]
+    workflows: [collect]
     types: [completed]
   workflow_dispatch:
 

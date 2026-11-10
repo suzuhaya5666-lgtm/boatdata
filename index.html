@@ -424,6 +424,16 @@ function drawCardTab(v, race) {
 }
 
 // ---------------------------------------------------------------- 共通
+// 直前情報はサイトの公開を待たずに、リポジトリから直接読む(数分で反映)
+const RAW = "https://raw.githubusercontent.com/suzuhaya5666-lgtm/boatdata/main/";
+async function getBefore(hd, venue, no) {
+  const path = `data/before/${hd}/${venue}_${String(no).padStart(2, "0")}.json`;
+  try {
+    const r = await fetch(RAW + path, { cache: "no-store" });
+    if (r.ok) return await r.json();
+  } catch (e) { /* 読めなければサイト側を見る */ }
+  return getJSON(path).catch(() => null);
+}
 const cache = {};
 async function cached(path) {
   if (!(path in cache)) {
@@ -539,7 +549,7 @@ const WIND = ["", "北", "北北東", "北東", "東北東", "東", "東南東",
 async function drawExhTab(v, race) {
   loading();
   const hd = state.date.replace(/-/g, "");
-  const bi = await getJSON(`data/before/${hd}/${state.venue}_${String(race.no).padStart(2, "0")}.json`).catch(() => null);
+  const bi = await getBefore(hd, state.venue, race.no);
   if (state.dtab !== "exh") return;
   const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
   const hasResult = race.entries.some((e) => e.course);
@@ -676,7 +686,7 @@ async function drawDemeTab(v, race) {
   const hd = state.date.replace(/-/g, "");
   const [model, vs, bi, ...files] = await Promise.all([
     cached("data/model/weights.json"), cached("data/stats/venues.json"),
-    getJSON(`data/before/${hd}/${state.venue}_${String(race.no).padStart(2, "0")}.json`).catch(() => null),
+    getBefore(hd, state.venue, race.no),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
   if (state.dtab !== "deme") return;
   if (!model || !vs) { $("view-race").innerHTML = '<div class="empty">出目確率のデータがまだありません。</div>'; return; }
