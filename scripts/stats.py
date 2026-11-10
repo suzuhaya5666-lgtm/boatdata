@@ -122,6 +122,47 @@ def venue_stats(races):
     return {"course": v["course"], "kimarite": v["kimarite"], "race": out}
 
 
+# ---------------------------------------------------------------- 3・4コースの平均ST差
+ST34_BINS6 = [(-9, -0.03, "4が.03以上遅い"), (-0.03, -0.01, "4が.01〜.03遅い"), (-0.01, 0.01, "ほぼ同じ(±.01)"),
+              (0.01, 0.03, "4が.01〜.03早い"), (0.03, 0.05, "4が.03〜.05早い"), (0.05, 9, "4が.05以上早い")]
+ST34_BINS3 = [(-9, -0.01, "4が遅い(.01以上)"), (-0.01, 0.01, "ほぼ同じ(±.01)"), (0.01, 9, "4が早い(.01以上)")]
+
+
+def st34(races):
+    """3コースと4コースの選手の「そのコースでの平均ST」(その日より前)の差で分けた、各コースの着順率。"""
+    acc = {}
+    rows = []
+    day = None
+    pending = []
+    for date, code, race, ents, _ in races:
+        if date != day:
+            for regno, c, v in pending:
+                a = acc.setdefault((regno, c), [0.0, 0])
+                a[0] += v
+                a[1] += 1
+            pending, day = [], date
+        cs = {e["course"]: e for e in ents}
+        if sorted(cs) == [1, 2, 3, 4, 5, 6]:
+            a3 = acc.get((cs[3]["regno"], 3)); a4 = acc.get((cs[4]["regno"], 4))
+            if a3 and a4 and a3[1] >= 5 and a4[1] >= 5:
+                rows.append((a3[0] / a3[1] - a4[0] / a4[1], code, [cs[k].get("place") for k in range(1, 7)]))
+        for e in ents:
+            v = st_value(e.get("st"))
+            if v is not None:
+                pending.append((e["regno"], e["course"], v))
+
+    def table(rs, bins):
+        out = []
+        for lo, hi, lab in bins:
+            m = [r for r in rs if lo <= r[0] < hi]
+            n = len(m)
+            out.append({"bin": lab, "n": n, "c": {str(k): [round(sum(1 for r in m if r[2][k - 1] is not None and r[2][k - 1] <= j) / n * 100, 1) if n else None
+                                                         for j in (1, 2, 3)] for k in range(1, 7)}})
+        return out
+    return {"overall": table([r for r in rows if r[1] != "03"], ST34_BINS6),  # 江戸川は特殊なので除く
+            "venues": {c: table([r for r in rows if r[1] == c], ST34_BINS3) for c in VENUES}}
+
+
 # ---------------------------------------------------------------- 選手
 # 1走の記録: (日付, 場, コース, 着, 自分の決まり手, 負けた決まり手, 1コースが勝ったか, 区分, ST, 他艇[(コース, 着)])
 def sheet(recs):
@@ -233,6 +274,7 @@ def main():
         out["venues"][code] = {"name": name}
         for cat in CATS:
             out["venues"][code][cat] = venue_stats([r for r in mine if in_cat(cat, r[4])])
+    out["st34"] = st34(races)
     with open(os.path.join(DATA, "stats", "venues.json"), "w", encoding="utf-8") as f:
         json.dump(out, f, ensure_ascii=False, separators=(",", ":"))
 

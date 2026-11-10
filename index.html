@@ -218,6 +218,8 @@
   .pop.over { background: #ffe3e3; color: #c92a2a; } .pop.fair { background: #f1f3f5; color: #495057; } .pop.under { background: #d3f9d8; color: #2b8a3e; }
   table.memo td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
   .plus { color: #2b8a3e; font-weight: 700; } .minus { color: #e03131; font-weight: 700; }
+  table.st34 td.c4, table.st34 th.c4 { background: #f3f8ff; }
+  table.st34 td { text-align: center; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -1540,11 +1542,27 @@ async function renderVenue() {
         <th>3連単<br>平均</th><th>3連単<br>中央値</th><th>万舟率</th><th>1番人気<br>決着率</th></tr></thead>
         <tbody>${rrow}</tbody></table></div>
       <div class="note">平均は高配当に引っぱられるので、ふだんの配当の目安は中央値を見てください。</div>
-    </div>`;
+    </div>
+    ${vs.st34 ? `<div class="card"><h2>3・4コースの平均ST差と各コースの成績</h2>
+      <div class="note" style="margin-bottom:6px">差＝3コースの選手の平均ST − 4コースの選手の平均ST（どちらもそのコースでの、そのレースより前の平均）。各欄は 1着率 / 2連対率 / 3連対率（%）。グレードの切り替えは効きません。</div>
+      <h3 class="oh">${esc(vv.name)}</h3>${st34Table(vs.st34.venues[code])}
+      <h3 class="oh">全国（江戸川を除く23場）</h3>${st34Table(vs.st34.overall)}</div>` : ""}`;
   $("vg").querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; renderVenue(); });
   box.querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => {
     state.venue = b.dataset.sv; store.set("venue", state.venue); renderVenue();
   }));
+}
+
+function st34Table(rows) {
+  if (!rows) return "";
+  const f1 = (x) => x == null ? "-" : x.toFixed(1);
+  const best = [1, 2, 3, 4, 5, 6].map((k) => Math.max(...rows.map((r) => r.c[k]?.[0] ?? 0)));
+  return `<div class="tbl"><table class="grid2 st34"><thead><tr><th>4コースは<br>3コースより</th><th>数</th>${[1, 2, 3, 4, 5, 6].map((k) =>
+    `<th class="${k === 4 ? "c4" : ""}"><span class="waku w${k}">${k}</span></th>`).join("")}</tr></thead><tbody>${rows.map((r) => `<tr>
+      <td style="text-align:left;white-space:nowrap">${esc(r.bin)}</td><td>${r.n.toLocaleString()}</td>
+      ${[1, 2, 3, 4, 5, 6].map((k) => { const c = r.c[k] || []; return `<td class="${k === 4 ? "c4" : ""}">
+        <div class="v ${c[0] === best[k - 1] && r.n ? "pk" : ""}"><b>${f1(c[0])}</b></div><div class="v sub">${f1(c[1])} / ${f1(c[2])}</div></td>`; }).join("")}</tr>`).join("")}</tbody></table></div>
+    <div class="note">各コースで1着率が一番高い段をピンクにしています。</div>`;
 }
 
 async function openRacer(regno, course) {
