@@ -620,6 +620,39 @@ function demeQ(order, racers, vstat, model) {
   }
   return q;
 }
+// 材料(展示タイム・勝率・モーター・級別・平均ST)を係数で足す
+const CLS_NUM = { A1: 4, A2: 3, B1: 2, B2: 1 };
+function demeAdjust(q, order, ents, racers, bi, model) {
+  if (!model.coef) return { q, used: [] };
+  const val = (f, b) => {
+    const e = ents[b] || {};
+    if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
+    if (f === "class") return CLS_NUM[e.class] ?? null;
+    if (f === "avg_st") return racers[b]?.sheet?.all?.st?.total?.avg ?? null;
+    return e[f] ?? null;
+  };
+  const used = [];
+  const Z = {};
+  for (let k = 1; k <= 6; k++) Z[k] = [];
+  model.features.forEach((f, i) => {
+    const raw = [1, 2, 3, 4, 5, 6].map((k) => val(f, order[k]));
+    const have = raw.filter((x) => x != null && !Number.isNaN(x));
+    if (have.length) used.push(model.feature_names[i]);
+    const mean = have.length ? have.reduce((a, b) => a + b, 0) / have.length : 0;
+    [1, 2, 3, 4, 5, 6].forEach((k, n) => { Z[k][i] = ((raw[n] ?? mean) - mean) / model.sd[i]; });
+  });
+  const out = {};
+  for (let k = 1; k <= 6; k++) out[k] = [0, 0, 0];
+  for (let j = 0; j < 3; j++) {
+    const c = model.coef[j];
+    const sc = [1, 2, 3, 4, 5, 6].map((k) => c[0] * Math.log(q[k][j]) + Z[k].reduce((a, z, i) => a + c[i + 1] * z, 0));
+    const mx = Math.max(...sc);
+    const ex = sc.map((x) => Math.exp(x - mx));
+    const sum = ex.reduce((a, b) => a + b, 0);
+    [1, 2, 3, 4, 5, 6].forEach((k, n) => { out[k][j] = ex[n] / sum; });
+  }
+  return { q: out, used };
+}
 function demeTri(q) {
   const out = [];
   for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) for (let c = 1; c <= 6; c++) {
@@ -657,8 +690,14 @@ async function drawDemeTab(v, race) {
   const order = state.orders[key] || base;
   const custom = !!state.orders[key];
 
-  const q = demeQ(order, racers, vs.venues[state.venue].all, model);
+  const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model);
+  const q = adj.q;
+  const hasExh = adj.used.includes("展示タイム");
   const tri = demeTri(q);
+  // 表に出す各着の確率は、120通りを足し合わせた本当の確率(コース別)
+  const marg = {};
+  for (let k = 1; k <= 6; k++) marg[k] = [0, 0, 0];
+  tri.forEach((t) => t.c.forEach((k, j) => { marg[k][j] += t.p; }));
   const done = race.entries.some((e) => e.place === 1);
   const res = done ? [1, 2, 3].map((p) => race.entries.find((e) => e.place === p)?.boat) : null;
   const boatOf = (c) => order[c];
@@ -666,12 +705,12 @@ async function drawDemeTab(v, race) {
   const isHit = (boats) => res && boats.every((b, i) => b === res[i]);
 
   // 各艇の確率表(コース順)
-  const cols = [0, 1, 2].map((j) => ranks([1, 2, 3, 4, 5, 6].map((c) => q[c][j])));
+  const cols = [0, 1, 2].map((j) => ranks([1, 2, 3, 4, 5, 6].map((c) => marg[c][j])));
   const rows = [1, 2, 3, 4, 5, 6].map((c, i) => {
     const e = ents[boatOf(c)];
     return `<tr><td class="${c !== e.boat ? "moved" : ""}">${c}</td>${lane(e)}
-      ${[0, 1, 2].map((j) => `<td class="${cols[j][i]}">${(q[c][j] * 100).toFixed(1)}%</td>`).join("")}
-      <td>${((q[c][0] + q[c][1]) * 100).toFixed(1)}%</td></tr>`;
+      ${[0, 1, 2].map((j) => `<td class="${cols[j][i]}">${(marg[c][j] * 100).toFixed(1)}%</td>`).join("")}
+      <td>${((marg[c][0] + marg[c][1]) * 100).toFixed(1)}%</td><td>${((marg[c][0] + marg[c][1] + marg[c][2]) * 100).toFixed(1)}%</td></tr>`;
   }).join("");
 
   // 3連単(艇番で表示)
@@ -703,7 +742,8 @@ async function drawDemeTab(v, race) {
     </div>
     <div class="card">
       <h2>各艇の着順確率</h2>
-      <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th></tr></thead>
+      <div class="meta"><span>${hasExh ? "展示タイム込み" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
+      <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th><th>3連対</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
     </div>
     <div class="card">
@@ -727,6 +767,9 @@ async function drawDemeTab(v, race) {
         各艇の1〜3着確率は、<b>自艇の成績</b>（その選手がそのコースで走ったときの着率）と、<b>他艇から見た成績</b>（ほかの選手のレースで、そのコースの艇が何着だったか）を、着ごと・コースごとに決めた重みで混ぜています。
         走った回数が少ない成績は、${esc(v.name)}のコース別平均に${model.m}走分寄せています。
         重みは過去${model.races.toLocaleString()}レース（${model.from}〜${model.to}）で、実際の着順に一番合うように毎月作り直しています。</div>
+      <div class="note" style="font-size:13px;line-height:1.7;margin-top:8px">
+        そのうえで、${(model.feature_names || []).join("・")}をレース内で比べた差を、着ごとの係数で足しています（係数も毎月作り直し）。展示前は展示タイムを使わずに計算し、展示が取れたら自動で入ります。</div>
+      ${coefTable(model)}
       <div class="tbl">${weightTable(model)}</div>
     </div>`;
 
@@ -748,6 +791,17 @@ async function drawDemeTab(v, race) {
   if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race); };
 }
 
+function coefTable(model) {
+  if (!model.coef) return "";
+  const rows = model.feature_names.map((nm, i) => `<tr><td style="text-align:left">${nm}</td>${[0, 1, 2].map((j) => {
+    const c = model.coef[j][i + 1];
+    const w = Math.min(Math.abs(c) / 0.45, 1);
+    return `<td style="background:rgba(${c < 0 ? "21,101,192" : "232,89,12"},${w * 0.5})">${c > 0 ? "+" : ""}${c.toFixed(2)}</td>`;
+  }).join("")}</tr>`).join("");
+  return `<div class="tbl"><table class="wt"><thead><tr><th>材料</th><th>1着</th><th>2着</th><th>3着</th></tr></thead><tbody>
+    <tr><td style="text-align:left">コース別成績の確率</td>${[0, 1, 2].map((j) => `<td>${model.coef[j][0].toFixed(2)}</td>`).join("")}</tr>${rows}</tbody></table></div>
+    <div class="note">材料の数字は、レース内で平均より1目盛り(標準的なばらつき)上のときの効き。＋は上の着に来やすく、−は来にくい。展示タイムと平均STは小さいほど良いので−が「効いている」向きです。</div>`;
+}
 function weightTable(model) {
   const head = ["自艇", "1コース", "2コース", "3コース", "4コース", "5コース", "6コース"];
   return [0, 1, 2].map((j) => `
