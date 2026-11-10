@@ -130,6 +130,17 @@
   td.moved { color: #e03131; font-weight: 800; }
   .new { color: #e03131; font-weight: 800; }
   .part { display: inline-block; background: #fff0f6; color: #c2255c; border-radius: 4px; padding: 1px 5px; margin: 1px; font-size: 12px; }
+  .mini { display: inline-block; width: 22px; height: 22px; line-height: 22px; text-align: center; font-weight: 800; border-radius: 4px; font-size: 13px; border: 1px solid #ccd; }
+  td.combo { white-space: nowrap; letter-spacing: 1px; }
+  tr.hit td { background: #d3f9d8 !important; font-weight: 800; }
+  .slots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; margin-top: 6px; }
+  .slot { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 6px 0; }
+  .slot small { color: var(--sub); font-size: 11px; }
+  .slot.on { background: #fff3bf; border-color: #f59f00; color: var(--ink); }
+  .slot .mini { width: 30px; height: 30px; line-height: 30px; font-size: 16px; }
+  table.wt { font-size: 12px; margin-top: 4px; }
+  table.wt td, table.wt th { padding: 4px 2px; }
+  table.wt td.na { color: #ccd; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -347,7 +358,7 @@ function drawList() {
 function drawDetail() {
   const v = state.day.venues[state.venue];
   const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
-  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示情報"], ["motor", "モーター成績"]];
+  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示情報"], ["motor", "モーター"], ["deme", "出目確率"]];
   state.dtab = state.dtab || "card";
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
@@ -363,6 +374,7 @@ function drawDetail() {
   if (state.dtab === "racer") return drawRacerTab(v, race);
   if (state.dtab === "exh") return drawExhTab(v, race);
   if (state.dtab === "motor") return drawMotorTab(v, race);
+  if (state.dtab === "deme") return drawDemeTab(v, race);
   drawCardTab(v, race);
 }
 
@@ -576,6 +588,176 @@ async function drawExhTab(v, race) {
         <tbody>${rows}</tbody></table></div>
       <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${status}</div>
     </div>`;
+}
+
+// ---------------------------------------------------------------- 出目確率
+// 重み W[着][対象コース][情報源] (情報源 0=自艇, c=コースcの選手から見た値) で
+// 各艇の1〜3着確率を出し、3連単120通りに組み立てる。
+const ZERO = { n: 0, p1: 0, p2: 0, p3: 0 };
+function demeQ(order, racers, vstat, model) {
+  const m = model.m;
+  const prior = {};
+  for (let k = 1; k <= 6; k++) {
+    const c = vstat.course[k];
+    prior[k] = [1, 2, 3].map((j) => (c[`p${j}`] + 1) / (c.n + 6));
+  }
+  const rate = (x, k, j) => (x[`p${j + 1}`] + m * prior[k][j]) / (x.n + m);
+  const q = {};
+  for (let k = 1; k <= 6; k++) q[k] = [0, 0, 0];
+  for (let j = 0; j < 3; j++) {
+    for (let k = 1; k <= 6; k++) {
+      const me = racers[order[k]]?.sheet?.all;
+      let v = model.W[j][k][0] * rate(me?.course?.[k] || ZERO, k, j);
+      for (let c = 1; c <= 6; c++) {
+        if (c === k) continue;
+        const o = racers[order[c]]?.sheet?.all?.others?.[c]?.[k] || ZERO;
+        v += model.W[j][k][c] * rate(o, k, j);
+      }
+      q[k][j] = Math.max(v, 1e-6);
+    }
+    const s = [1, 2, 3, 4, 5, 6].reduce((a, k) => a + q[k][j], 0);
+    for (let k = 1; k <= 6; k++) q[k][j] /= s;
+  }
+  return q;
+}
+function demeTri(q) {
+  const out = [];
+  for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) for (let c = 1; c <= 6; c++) {
+    if (a === b || b === c || a === c) continue;
+    const p = q[a][0] * q[b][1] / (1 - q[a][1]) * q[c][2] / (1 - q[a][2] - q[b][2]);
+    out.push({ c: [a, b, c], p });
+  }
+  const s = out.reduce((x, y) => x + y.p, 0);
+  out.forEach((o) => { o.p /= s; });
+  return out.sort((x, y) => y.p - x.p);
+}
+function sumBy(tri, keyFn) {
+  const m = new Map();
+  tri.forEach((t) => { const k = keyFn(t.c); m.set(k, (m.get(k) || 0) + t.p); });
+  return [...m.entries()].map(([k, p]) => ({ k, p })).sort((a, b) => b.p - a.p);
+}
+
+async function drawDemeTab(v, race) {
+  loading();
+  const hd = state.date.replace(/-/g, "");
+  const [model, vs, bi, ...files] = await Promise.all([
+    cached("data/model/weights.json"), cached("data/stats/venues.json"),
+    getJSON(`data/before/${hd}/${state.venue}_${String(race.no).padStart(2, "0")}.json`).catch(() => null),
+    ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
+  if (state.dtab !== "deme") return;
+  if (!model || !vs) { $("view-race").innerHTML = '<div class="empty">出目確率のデータがまだありません。</div>'; return; }
+  const racers = Object.fromEntries(race.entries.map((e, i) => [e.boat, files[i]]));
+  const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
+
+  // 進入: 展示進入 → なければ枠なり。手で入れ替えたものは レースごとに覚える
+  const key = `${state.date}_${state.venue}_${race.no}`;
+  let base = [0, 1, 2, 3, 4, 5, 6], baseLabel = "枠なり（展示前）";
+  if (bi?.start?.length === 6) { base = [0, ...bi.start.map((s) => s.boat)]; baseLabel = "スタート展示の進入"; }
+  state.orders = state.orders || {};
+  const order = state.orders[key] || base;
+  const custom = !!state.orders[key];
+
+  const q = demeQ(order, racers, vs.venues[state.venue].all, model);
+  const tri = demeTri(q);
+  const done = race.entries.some((e) => e.place === 1);
+  const res = done ? [1, 2, 3].map((p) => race.entries.find((e) => e.place === p)?.boat) : null;
+  const boatOf = (c) => order[c];
+  const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  const isHit = (boats) => res && boats.every((b, i) => b === res[i]);
+
+  // 各艇の確率表(コース順)
+  const cols = [0, 1, 2].map((j) => ranks([1, 2, 3, 4, 5, 6].map((c) => q[c][j])));
+  const rows = [1, 2, 3, 4, 5, 6].map((c, i) => {
+    const e = ents[boatOf(c)];
+    return `<tr><td class="${c !== e.boat ? "moved" : ""}">${c}</td>${lane(e)}
+      ${[0, 1, 2].map((j) => `<td class="${cols[j][i]}">${(q[c][j] * 100).toFixed(1)}%</td>`).join("")}
+      <td>${((q[c][0] + q[c][1]) * 100).toFixed(1)}%</td></tr>`;
+  }).join("");
+
+  // 3連単(艇番で表示)
+  const triB = tri.map((t) => ({ b: t.c.map(boatOf), p: t.p }));
+  const hitRank = res ? triB.findIndex((t) => isHit(t.b)) : -1;
+  const list = (items, n, fmtKey) => items.slice(0, n).map((t, i) => `
+    <tr class="${t.hit ? "hit" : ""}"><td>${i + 1}</td><td class="combo">${fmtKey(t)}</td>
+      <td>${(t.p * 100).toFixed(1)}%</td><td>${(1 / t.p).toFixed(1)}倍</td></tr>`).join("");
+  const triRows = list(triB.map((t) => ({ ...t, hit: isHit(t.b) })), 20, (t) => t.b.map(bb).join("-"));
+  const exa = sumBy(triB.map((t) => ({ c: t.b, p: t.p })), (c) => `${c[0]}-${c[1]}`)
+    .map((x) => ({ ...x, hit: res && x.k === `${res[0]}-${res[1]}` }));
+  const trio = sumBy(triB.map((t) => ({ c: t.b, p: t.p })), (c) => [...c].sort().join("="))
+    .map((x) => ({ ...x, hit: res && x.k === [...res].sort().join("=") }));
+  const quin = sumBy(triB.map((t) => ({ c: t.b, p: t.p })), (c) => [c[0], c[1]].sort().join("="))
+    .map((x) => ({ ...x, hit: res && x.k === [res[0], res[1]].sort().join("=") }));
+  const keyFmt = (sep) => (t) => t.k.split(sep).map(Number).map(bb).join(sep === "=" ? "=" : "-");
+
+  // 進入の入れ替え
+  const slots = [1, 2, 3, 4, 5, 6].map((c) =>
+    `<button class="slot ${state.pick === c ? "on" : ""}" data-slot="${c}"><small>${c}コース</small>${bb(boatOf(c))}</button>`).join("");
+
+  $("view-race").innerHTML = `
+    <div class="card">
+      <h2>進入</h2>
+      <div class="slots">${slots}</div>
+      <div class="note">${custom ? "手で入れ替えた進入で計算しています。" : `${baseLabel}で計算しています。`}
+        入れ替えたい2つの枠を順にタップすると入れ替わります。</div>
+      ${custom ? '<button class="pill2" id="resetOrder" style="margin-top:8px">' + (bi?.start?.length === 6 ? "展示進入" : "枠なり") + "に戻す</button>" : ""}
+    </div>
+    <div class="card">
+      <h2>各艇の着順確率</h2>
+      <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </div>
+    <div class="card">
+      <h2>3連単 上位20点</h2>
+      ${res ? `<div class="meta"><span>結果 ${res.map(bb).join("-")} は ${hitRank + 1}番目（${(triB[hitRank].p * 100).toFixed(1)}%）</span></div>` : ""}
+      <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
+        <tbody>${triRows}</tbody></table></div>
+      <div class="note">目安オッズは 1÷確率。実際のオッズがこれより高ければ、確率の上では割に合う買い目です。上位20点の合計 ${(triB.slice(0, 20).reduce((a, t) => a + t.p, 0) * 100).toFixed(1)}%。</div>
+    </div>
+    <div class="card"><h2>2連単 上位10点</h2>
+      <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
+        <tbody>${list(exa, 10, keyFmt("-"))}</tbody></table></div></div>
+    <div class="card"><h2>3連複 上位10点</h2>
+      <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
+        <tbody>${list(trio, 10, keyFmt("="))}</tbody></table></div></div>
+    <div class="card"><h2>2連複 上位6点</h2>
+      <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
+        <tbody>${list(quin, 6, keyFmt("="))}</tbody></table></div></div>
+    <div class="card"><h2>計算のしかた</h2>
+      <div class="note" style="font-size:13px;line-height:1.7">
+        各艇の1〜3着確率は、<b>自艇の成績</b>（その選手がそのコースで走ったときの着率）と、<b>他艇から見た成績</b>（ほかの選手のレースで、そのコースの艇が何着だったか）を、着ごと・コースごとに決めた重みで混ぜています。
+        走った回数が少ない成績は、${esc(v.name)}のコース別平均に${model.m}走分寄せています。
+        重みは過去${model.races.toLocaleString()}レース（${model.from}〜${model.to}）で、実際の着順に一番合うように毎月作り直しています。</div>
+      <div class="tbl">${weightTable(model)}</div>
+    </div>`;
+
+  $("view-race").querySelectorAll("[data-slot]").forEach((b) => b.onclick = () => {
+    const c = Number(b.dataset.slot);
+    if (!state.pick) { state.pick = c; }
+    else {
+      if (state.pick !== c) {
+        const o = [...order];
+        [o[state.pick], o[c]] = [o[c], o[state.pick]];
+        state.orders[key] = o.join() === base.join() ? undefined : o;
+        if (!state.orders[key]) delete state.orders[key];
+      }
+      state.pick = null;
+    }
+    drawDemeTab(v, race);
+  });
+  const rb = $("resetOrder");
+  if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race); };
+}
+
+function weightTable(model) {
+  const head = ["自艇", "1コース", "2コース", "3コース", "4コース", "5コース", "6コース"];
+  return [0, 1, 2].map((j) => `
+    <div style="margin-top:10px;font-weight:700">${j + 1}着確率の重み</div>
+    <table class="wt"><thead><tr><th>対象</th>${head.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>
+    ${[1, 2, 3, 4, 5, 6].map((k) => `<tr><td>${k}コース</td>${[0, 1, 2, 3, 4, 5, 6].map((s) => {
+      const w = model.W[j][k][s];
+      return s === k ? '<td class="na">—</td>' : `<td style="background:rgba(21,101,192,${Math.min(w, 1) * 0.55})">${w >= 0.005 ? Math.round(w * 100) : ""}</td>`;
+    }).join("")}</tr>`).join("")}
+    </tbody></table>`).join("") + '<div class="note">数字は%。行のコースの艇の確率を出すとき、どこからの情報をどれだけ使っているか。</div>';
 }
 
 // ---------------------------------------------------------------- モーター成績

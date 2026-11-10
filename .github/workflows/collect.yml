@@ -49,6 +49,11 @@ jobs:
         run: |
           python scripts/collect.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" ${{ inputs.reparse && '--reparse' || '' }}
 
+      - name: 出目確率の重み(月1回)
+        run: |
+          pip install --quiet numpy scipy
+          python scripts/model.py
+
       - name: 保存
         run: |
           git config user.name "github-actions[bot]"
