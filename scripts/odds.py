@@ -15,7 +15,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect import DATA, JST  # noqa: E402
@@ -76,11 +75,13 @@ def parse_three(tbody, ordered):
 
 
 def fetch(page, rno, jcd, hd):
+    """curl で取る(Python の urllib だと GitHub の実行環境で毎回8秒ほど待たされるため)"""
     t = time.time()
-    req = urllib.request.Request(URL.format(page=page, rno=rno, jcd=jcd, hd=hd),
-                                 headers={"User-Agent": "Mozilla/5.0 (personal data collection)"})
-    with urllib.request.urlopen(req, timeout=20) as r:
-        body = r.read().decode("utf-8", errors="replace")
+    r = subprocess.run(["curl", "-sS", "-4", "--max-time", "20", "-A", "Mozilla/5.0 (personal data collection)",
+                        URL.format(page=page, rno=rno, jcd=jcd, hd=hd)], capture_output=True)
+    if r.returncode != 0:
+        raise RuntimeError(r.stderr.decode(errors="replace").strip())
+    body = r.stdout.decode("utf-8", errors="replace")
     if VERBOSE:
         print(f"  {page} {jcd} {rno}R {time.time() - t:.1f}秒 {len(body)}バイト", flush=True)
     return body

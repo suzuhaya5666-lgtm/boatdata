@@ -11,7 +11,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect import DATA, JST, VENUES  # noqa: E402
@@ -106,13 +105,12 @@ def fetch_once():
                     if json.load(f).get("complete"):
                         continue
             url = URL.format(rno=int(no), jcd=code, hd=f"{today:%Y%m%d}")
-            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (personal data collection)"})
-            try:
-                with urllib.request.urlopen(req, timeout=30) as r:
-                    html = r.read().decode("utf-8", errors="replace")
-            except Exception as e:  # 1レース失敗しても続ける
-                print(f"{VENUES[code]}{no}R: 取得失敗 {e}")
+            r = subprocess.run(["curl", "-sS", "-4", "--max-time", "20",
+                                "-A", "Mozilla/5.0 (personal data collection)", url], capture_output=True)
+            if r.returncode != 0:  # 1レース失敗しても続ける
+                print(f"{VENUES[code]}{no}R: 取得失敗 {r.stderr.decode(errors='replace').strip()}")
                 continue
+            html = r.stdout.decode("utf-8", errors="replace")
             time.sleep(1)
             info = parse(html)
             if not any(e["exh"] is not None for e in info["entries"].values()):
