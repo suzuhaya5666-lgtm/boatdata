@@ -1,0 +1,60 @@
+name: collect
+
+on:
+  schedule:
+    - cron: "20 23 * * *"   # 毎日 8:20(日本時間) 今日の出走表・前日の結果
+    - cron: "50 13 * * *"   # 毎日 22:50(日本時間) 今日の結果
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "開始日 YYYYMMDD(空なら直近3日)"
+        required: false
+        default: ""
+      end:
+        description: "終了日 YYYYMMDD(空なら今日)"
+        required: false
+        default: ""
+      reparse:
+        description: "保存済みの元データから解析だけやり直す"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 解凍ソフトの準備
+        run: |
+          which 7z || sudo apt-get install -y p7zip-full
+          sudo apt-get install -y lhasa || true
+
+      - name: データ収集
+        run: |
+          python scripts/collect.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" ${{ inputs.reparse && '--reparse' || '' }}
+
+      - name: 保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          if git diff --cached --quiet; then
+            echo "変更なし"
+          else
+            git commit -m "データ更新 $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')"
+            git pull --rebase
+            git push
+          fi
