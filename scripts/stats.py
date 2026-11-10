@@ -128,26 +128,28 @@ def sheet(recs):
     """コース別全艇成績と平均ST。"""
     course, others = {}, {}
     st = {k: [] for k in ("total", "slow", "dash", "day", "night", "c1", "c2", "c3", "c4", "c5", "c6")}
-    f = 0
-    for date, code, c, place, _, _, _, _, st_raw, oth in recs:
+    f = l = 0
+    for date, code, c, place, _, _, _, _, st_raw, oth, status in recs:
         add(course.setdefault(str(c), counter()), place)
         o = others.setdefault(str(c), {})
         for oc, op in oth:
             add(o.setdefault(str(oc), counter()), op)
-        if (st_raw or "").startswith("F"):
+        if (st_raw or "").startswith("F") or (status or "").startswith("F"):
             f += 1
+        if (status or "").startswith("L"):
+            l += 1
         v = st_value(st_raw)
         if v is not None:
             for k in ("total", f"c{c}", "slow" if c <= 3 else "dash", "night" if code in NIGHT else "day"):
                 st[k].append(v)
-    return {"course": course, "others": others, "f": f,
+    return {"course": course, "others": others, "f": f, "l": l,
             "st": {k: {"n": len(x), "avg": round(statistics.mean(x), 3) if x else None} for k, x in st.items()}}
 
 
 def bucket(recs):
     """枠別着率と決まり手。"""
     b = {"n": 0, "p1": 0, "p2": 0, "p3": 0, "win": {}, "lost": {}, "nigashi": 0}
-    for _, _, _, place, own, lost, c1won, _, _, _ in recs:
+    for _, _, _, place, own, lost, c1won, _, _, _, _ in recs:
         b["n"] += 1
         if place in (1, 2, 3):
             b[f"p{place}"] += 1
@@ -246,7 +248,7 @@ def main():
                 date, code, e["course"], e.get("place"),
                 km if e.get("place") == 1 and km else None,
                 km if e["course"] == 1 and winner is not None and winner is not e and km else None,
-                e["course"] >= 2 and c1won, cat, e.get("st"), oth))
+                e["course"] >= 2 and c1won, cat, e.get("st"), oth, e.get("status")))
             if e.get("name"):
                 names[e["regno"]] = e["name"]
             vc = venues_count.setdefault(e["regno"], {})

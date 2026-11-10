@@ -144,6 +144,17 @@
   .stb { display: inline-block; font-size: 11px; font-weight: 800; margin-left: 4px; padding: 1px 4px; border-radius: 4px; background: #eef2f7; color: #495057; }
   .stb:empty { display: none; }
   .stb.fast { background: #ffe3e3; color: #c92a2a; } .stb.slow { background: #e7f5ff; color: #1864ab; }
+  /* ---- 出走表(縦線つき) */
+  table.grid2 { border: 1px solid var(--line); }
+  table.grid2 th, table.grid2 td { border-left: 1px solid var(--line); padding: 4px 6px; vertical-align: middle; }
+  table.grid2 th { background: #f6f8fb; line-height: 1.3; }
+  table.grid2 td.lk { width: 30px; font-weight: 800; font-size: 17px; padding: 0; }
+  table.grid2 td.name { min-width: 110px; font-weight: 700; line-height: 1.5; }
+  table.grid2 td.name small { font-weight: 400; }
+  table.grid2 .v { padding: 3px 4px; border-radius: 3px; font-variant-numeric: tabular-nums; }
+  table.grid2 .v.sub { font-size: 13px; color: #495057; margin-top: 2px; }
+  .v.pk { background: #ffc9de; } .v.ye { background: #fff3bf; }
+  .red { color: #e03131; font-weight: 800; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
   .seg button { padding: 4px 10px; }
@@ -381,7 +392,18 @@ function drawDetail() {
   drawCardTab(v, race);
 }
 
-function drawCardTab(v, race) {
+// 数値の良い順に 1番=ピンク、2番=黄色。higher=true なら大きいほど良い
+function rankCls(values, higher = true) {
+  // 表示している桁で比べる(同じ表示なら同じ色)
+  const v = values.map((x) => (x == null || Number.isNaN(Number(x)) ? null : Math.round(Number(x) * 100) / 100));
+  const uniq = [...new Set(v.filter((x) => x != null))].sort((a, b) => higher ? b - a : a - b);
+  return v.map((x) => x == null ? "" : x === uniq[0] ? "pk" : x === uniq[1] ? "ye" : "");
+}
+
+async function drawCardTab(v, race) {
+  loading();
+  const files = await Promise.all(race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`)));
+  if (state.dtab !== "card") return;
   const w = race.weather;
   const meta = [
     race.deadline ? `締切 ${race.deadline}` : "",
@@ -390,33 +412,42 @@ function drawCardTab(v, race) {
     race.kimarite ? `決まり手 ${esc(race.kimarite)}` : "",
   ].filter(Boolean).map((s) => `<span>${s}</span>`).join("");
 
-  const rows = race.entries.map((e) => `
-    <tr>
-      <td><span class="waku w${e.boat}">${e.boat}</span></td>
-      <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}<span class="stb" id="stb${e.boat}"></span><br>
-        <small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}<span id="stc${e.boat}"></span></small></td>
-      <td>${fmt(e.nat_win)}<br><small>${fmt(e.nat_2, 1)}%</small></td>
-      <td>${fmt(e.loc_win)}<br><small>${fmt(e.loc_2, 1)}%</small></td>
-      <td>${e.motor_no ?? "-"}<br><small>${fmt(e.motor_2, 1)}%</small></td>
-      <td>${e.exh != null ? fmt(e.exh) : "-"}</td>
-      <td>${e.course ?? "-"}</td>
-      <td>${esc(e.st ?? "-")}</td>
-      <td class="${e.place === 1 ? "p1" : ""}">${e.place ?? esc(statusText(e.status) || "-")}</td>
-    </tr>`).join("");
-  // 平均ST(直近1年)を選手の集計から後から入れる
-  race.entries.forEach(async (e) => {
-    const r = await cached(`data/stats/racers/${e.regno}.json`);
-    const st = r?.sheet?.all?.st;
-    if (!st || state.dtab !== "card") return;
-    const b = $("stb" + e.boat), c = $("stc" + e.boat);
-    const fmtSt = (x) => x == null ? "-" : x.toFixed(2).replace(/^0/, "");
-    if (b && st.total.avg != null) {
-      b.textContent = "ST" + fmtSt(st.total.avg);
-      b.className = "stb " + (st.total.avg <= 0.14 ? "fast" : st.total.avg >= 0.18 ? "slow" : "");
-    }
-    const k = `c${e.course || e.boat}`;
-    if (c && st[k]) c.textContent = ` ・${e.course || e.boat}コース ST${fmtSt(st[k].avg)}(${st[k].n}本)` + (r.sheet.all.f ? ` F${r.sheet.all.f}` : "");
-  });
+  const E = race.entries;
+  const sh = files.map((f) => f?.sheet?.all);
+  const stAvg = sh.map((s) => s?.st?.total?.avg ?? null);
+  const stCourse = E.map((e, i) => sh[i]?.st?.[`c${e.course || e.boat}`]?.avg ?? null);
+  const stCourseN = E.map((e, i) => sh[i]?.st?.[`c${e.course || e.boat}`]?.n ?? 0);
+  const col = {
+    stAvg: rankCls(stAvg, false), stCourse: rankCls(stCourse, false),
+    natWin: rankCls(E.map((e) => e.nat_win)), nat2: rankCls(E.map((e) => e.nat_2 != null ? Math.round(e.nat_2 * 10) / 10 : null)),
+    locWin: rankCls(E.map((e) => e.loc_win)), loc2: rankCls(E.map((e) => e.loc_2 != null ? Math.round(e.loc_2 * 10) / 10 : null)),
+    motor2: rankCls(E.map((e) => e.motor_2 != null ? Math.round(e.motor_2 * 10) / 10 : null)),
+    boat2: rankCls(E.map((e) => e.boat_2 != null ? Math.round(e.boat_2 * 10) / 10 : null)),
+    exh: rankCls(E.map((e) => e.exh), false),
+    st: rankCls(E.map((e) => (/^\d?\.\d+$/.test(e.st || "") ? Number(e.st) : null)), false),
+  };
+  const fst = (x) => x == null ? "-" : x.toFixed(2).replace(/^0/, "");
+  const two = (a, ca, b, cb) => `<div class="v ${ca}">${a}</div><div class="v sub ${cb}">${b}</div>`;
+  const hasResult = E.some((e) => e.place != null || e.status);
+
+  const rows = E.map((e, i) => {
+    const s = sh[i];
+    const f = s?.f || 0, l = s?.l || 0;
+    return `<tr>
+      <td class="lk k${e.boat}">${e.boat}</td>
+      <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>
+        ${e.class ? `<br><span class="cls ${e.class}">${e.class}</span>` : ""}
+        <br><small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}${e.weight ? ` ${e.weight}kg` : ""}</small></td>
+      <td>${two(fst(stAvg[i]), col.stAvg[i], `${e.course || e.boat}コ ${fst(stCourse[i])}<small class="cnt">(${stCourseN[i]})</small>`, col.stCourse[i])}</td>
+      <td>${two(`<span class="${f ? "red" : ""}">F${f}</span>`, "", `<span class="${l ? "red" : ""}">L${l}</span>`, "")}</td>
+      <td>${two(fmt(e.nat_win), col.natWin[i], `${fmt(e.nat_2, 1)}%`, col.nat2[i])}</td>
+      <td>${two(fmt(e.loc_win), col.locWin[i], `${fmt(e.loc_2, 1)}%`, col.loc2[i])}</td>
+      <td>${two(`<small>No.</small>${e.motor_no ?? "-"}`, "", `${fmt(e.motor_2, 1)}%`, col.motor2[i])}</td>
+      <td>${two(`<small>No.</small>${e.boat_no ?? "-"}`, "", `${fmt(e.boat_2, 1)}%`, col.boat2[i])}</td>
+      ${hasResult ? `<td>${two(e.exh != null ? fmt(e.exh) : "-", col.exh[i], `進入 ${e.course ?? "-"}`, "")}</td>
+      <td>${two(esc(e.st ?? "-"), col.st[i], `<b class="${e.place === 1 ? "p1" : ""}">${e.place ? e.place + "着" : esc(statusText(e.status) || "-")}</b>`, "")}</td>` : ""}
+    </tr>`;
+  }).join("");
 
   let pay = "";
   if (race.payouts && Object.keys(race.payouts).length) {
@@ -431,12 +462,14 @@ function drawCardTab(v, race) {
     <div class="card">
       <h2>${esc(v.name)} ${race.no}R ${esc(race.name || "")}</h2>
       <div class="meta">${meta}</div>
-      <div class="tbl"><table>
-        <thead><tr><th>枠</th><th>選手</th><th>全国<br>勝率</th><th>当地<br>勝率</th><th>モーター<br>2連率</th>
-          <th>展示</th><th>進入</th><th>ST</th><th>着</th></tr></thead>
+      <div class="tbl"><table class="grid2">
+        <thead><tr><th>枠</th><th>選手</th><th>平均ST<br><small>コース別</small></th><th>F<br>L</th>
+          <th>全国勝率<br><small>2連率</small></th><th>当地勝率<br><small>2連率</small></th>
+          <th>モーター<br><small>2連率</small></th><th>ボート<br><small>2連率</small></th>
+          ${hasResult ? "<th>展示<br><small>進入</small></th><th>ST<br><small>着順</small></th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      <div class="note">級別の横のSTは直近1年の平均スタート（フライング・出遅れは除く）。.14以下は赤、.18以上は青。その下はこのレースのコースでの平均STと本数。</div>
+      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。F・Lは直近1年の回数。</div>
     </div>
     ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}`;
 }
