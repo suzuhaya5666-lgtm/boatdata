@@ -15,6 +15,10 @@ on:
         description: "終了日 YYYYMMDD(空なら今日)"
         required: false
         default: ""
+      minutes:
+        description: "最長で何分取るか"
+        required: false
+        default: "330"
 
 permissions:
   contents: write
@@ -38,4 +42,4 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python -u scripts/odds.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes 330 --push-every 200
+          python -u scripts/odds.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes "${{ inputs.minutes || '330' }}" --push-every 200 --verbose

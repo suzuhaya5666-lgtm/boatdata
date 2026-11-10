@@ -76,10 +76,17 @@ def parse_three(tbody, ordered):
 
 
 def fetch(page, rno, jcd, hd):
+    t = time.time()
     req = urllib.request.Request(URL.format(page=page, rno=rno, jcd=jcd, hd=hd),
                                  headers={"User-Agent": "Mozilla/5.0 (personal data collection)"})
-    with urllib.request.urlopen(req, timeout=30) as r:
-        return r.read().decode("utf-8", errors="replace")
+    with urllib.request.urlopen(req, timeout=20) as r:
+        body = r.read().decode("utf-8", errors="replace")
+    if VERBOSE:
+        print(f"  {page} {jcd} {rno}R {time.time() - t:.1f}秒 {len(body)}バイト", flush=True)
+    return body
+
+
+VERBOSE = "--verbose" in sys.argv
 
 
 def get_race(rno, jcd, hd):
@@ -117,6 +124,7 @@ def main():
     ap.add_argument("--start", default="")
     ap.add_argument("--end", default="")
     ap.add_argument("--max-minutes", type=float, default=60)
+    ap.add_argument("--verbose", action="store_true")
     ap.add_argument("--push-every", type=int, default=0, help="この件数ごとに GitHub に保存(0なら保存しない)")
     a = ap.parse_args()
     today = dt.datetime.now(JST).date()
