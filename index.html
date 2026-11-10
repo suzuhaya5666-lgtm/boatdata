@@ -141,6 +141,7 @@
   .slot.cutbtn.on .mini { opacity: .35; }
   .slot.cutbtn.on small { color: #e03131; font-weight: 800; }
   tr.cutrow td { color: #adb5bd; }
+  .slot.headbtn.on small { color: #e03131; font-weight: 800; }
   .slot .mini { width: 30px; height: 30px; line-height: 30px; font-size: 16px; }
   table.wt { font-size: 12px; margin-top: 4px; }
   table.wt td, table.wt th { padding: 4px 2px; }
@@ -1293,9 +1294,12 @@ async function drawDemeTab(v, race) {
   state.cuts = state.cuts || {};
   const cut = new Set(state.cuts[key] || []);
   const triAll = demeTri(q);
+  state.heads = state.heads || {};
+  const head = state.heads[key] || 0;
+  if (head) cut.delete(head);
   let tri = triAll, keep = 1;
-  if (cut.size) {
-    tri = triAll.filter((t) => !t.c.some((c) => cut.has(boatOf(c))));
+  if (cut.size || head) {
+    tri = triAll.filter((t) => !t.c.some((c) => cut.has(boatOf(c))) && (!head || boatOf(t.c[0]) === head));
     keep = tri.reduce((a, t) => a + t.p, 0);
     tri = tri.map((t) => ({ ...t, p: t.p / keep }));
   }
@@ -1347,12 +1351,15 @@ async function drawDemeTab(v, race) {
     </div>
     ${featCard(model, adj)}
     <div class="card">
-      <h2>切る艇</h2>
+      <h2>頭固定</h2>
+      <div class="slots">${[1, 2, 3, 4, 5, 6].map((b) => `<button class="slot headbtn ${head === b ? "on" : ""}" data-head="${b}"><small>${head === b ? "1着" : "&nbsp;"}</small>${bb(b)}</button>`).join("")}</div>
+      <div class="note">${head ? `${bb(head)} が1着になる前提で、2・3着の確率を出し直しています。` : "1着に固定したい艇をタップすると、その艇が勝つ前提の確率に出し直します。"}</div>
+      <h2 style="margin-top:14px">切る艇</h2>
       <div class="slots">${[1, 2, 3, 4, 5, 6].map((b) => `<button class="slot cutbtn ${cut.has(b) ? "on" : ""}" data-cut="${b}"><small>${cut.has(b) ? "切り" : "&nbsp;"}</small>${bb(b)}</button>`).join("")}</div>
-      <div class="note">${cut.size
-        ? `${[...cut].sort().map(bb).join("・")} が3着以内に来ない前提で、残りの組み合わせだけで確率を出し直しています。この前提になる確率（切った艇がどれも3着以内に来ない確率）は <b>${(keep * 100).toFixed(1)}%</b>。`
+      <div class="note">${cut.size ? `${[...cut].sort().map(bb).join("・")} が3着以内に来ない前提で、残りの組み合わせだけで確率を出し直しています。`
         : "3着以内に来ないと思う艇をタップすると、その艇を除いた確率に出し直します（3艇まで）。"}</div>
-      ${cut.size ? '<button class="pill2" id="resetCut" style="margin-top:8px">切りをすべて解除</button>' : ""}
+      ${cut.size || head ? `<div class="note">この前提（${[head ? `${bb(head)}が1着` : "", cut.size ? `${[...cut].sort().map(bb).join("・")}が3着以内に来ない` : ""].filter(Boolean).join("、")}）になる確率は <b>${(keep * 100).toFixed(1)}%</b>。</div>
+        <button class="pill2" id="resetCut" style="margin-top:8px">頭固定・切りをすべて解除</button>` : ""}
     </div>
     <div class="card">
       <h2>各艇の着順確率</h2>
@@ -1411,12 +1418,19 @@ async function drawDemeTab(v, race) {
   if (fa) fa.onclick = () => { state.featMask = null; drawDemeTab(v, race); };
   $("view-race").querySelectorAll("[data-cut]").forEach((b) => b.onclick = () => {
     const n = Number(b.dataset.cut);
+    if (n === head) return;
     if (cut.has(n)) cut.delete(n); else if (cut.size < 3) cut.add(n);
     if (cut.size) state.cuts[key] = [...cut]; else delete state.cuts[key];
     drawDemeTab(v, race);
   });
+  $("view-race").querySelectorAll("[data-head]").forEach((b) => b.onclick = () => {
+    const n = Number(b.dataset.head);
+    if (head === n) delete state.heads[key];
+    else { state.heads[key] = n; if (state.cuts[key]) { state.cuts[key] = state.cuts[key].filter((x) => x !== n); if (!state.cuts[key].length) delete state.cuts[key]; } }
+    drawDemeTab(v, race);
+  });
   const rc = $("resetCut");
-  if (rc) rc.onclick = () => { delete state.cuts[key]; drawDemeTab(v, race); };
+  if (rc) rc.onclick = () => { delete state.cuts[key]; delete state.heads[key]; drawDemeTab(v, race); };
   const rb = $("resetOrder");
   if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race); };
 }
