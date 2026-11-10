@@ -214,6 +214,7 @@
   input.amt { width: 56px; font-size: 16px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
   #mmode { font-size: 15px; padding: 6px; border-radius: 6px; border: 1px solid var(--line); }
   table.memo td.payc { text-align: right; }
+  table.memo td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
   .plus { color: #2b8a3e; font-weight: 700; } .minus { color: #e03131; font-weight: 700; }
   /* ---- 場データ・選手 */
   .seg { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0; }
@@ -709,6 +710,7 @@ async function drawOddsTab(v, race, force) {
   const hd = state.date.replace(/-/g, "");
   const [live, fin, dm] = await Promise.all([getLive(hd, state.venue, race.no), getOdds(hd, state.venue, race.no), computeDeme(race)]);
   if (state.dtab !== "odds") return;
+  state.memoDm = dm;  // 買い目メモで目安オッズに使う
   const finished = race.entries.some((e) => e.place != null || e.status);
   // 終わったレースは締切時オッズを優先(単勝・複勝・拡連複は最後に取れた分)
   const od = finished && fin ? { ...(live || {}), ...fin, time: null } : (live || fin);
@@ -878,13 +880,19 @@ function openMemo(v, race, od) {
   const withOdds = list.filter((m) => odd(m) > 0);
   const synth = withOdds.length ? 1 / withOdds.reduce((a, m) => a + 1 / odd(m), 0) : null;
   const total = list.reduce((a, m) => a + (m.amt || 0), 0);
+  // 目安オッズ(=1÷出目確率)と、その合成(=1÷確率の合計)
+  const pr = (m) => state.memoDm?.prob?.[DEME_KEY[m.t]]?.[demeKey(m.t, m.k)] ?? null;
+  const psum = list.reduce((a, m) => a + (pr(m) || 0), 0);
+  const fairSynth = psum > 0 ? 1 / psum : null;
   const sorted = [...list].sort((a, b) => state.memoSort === "odds" ? (odd(a) || 1e9) - (odd(b) || 1e9)
     : (a.t + a.k).localeCompare(b.t + b.k));
   const bb = (b) => `<span class="mini k${b}">${b}</span>`;
   const rows = sorted.map((m) => {
     const o = odd(m), pay = o ? Math.floor(o * m.amt) : null, pl = pay != null ? pay - total : null;
+    const p = pr(m), fair = p ? 1 / p : null;
     return `<tr><td>${m.k.split(/[-=]/).map(Number).map(bb).join(ORDERED[m.t] ? "-" : "=")}<br><small class="cnt">${ONAME[m.t]}</small></td>
       <td>${ofmt(od?.[m.t]?.[m.k])}</td>
+      <td class="${o && fair && o > fair ? "val" : ""}">${fair ? fair.toFixed(1) : "-"}<br><small class="cnt">${p ? (p * 100).toFixed(1) + "%" : ""}</small></td>
       <td><input class="amt" type="number" min="0" step="1" value="${(m.amt || 0) / 100}" data-t="${m.t}" data-k="${m.k}"><small>00円</small></td>
       <td class="payc">${pay != null ? pay.toLocaleString() + "円" : "-"}<br><small class="${pl >= 0 ? "plus" : "minus"}">${pl != null ? (pl >= 0 ? "+" : "") + pl.toLocaleString() + "円" : ""}</small></td>
       <td><button class="chk2" data-del="${m.t}|${m.k}">削</button></td></tr>`;
@@ -895,16 +903,18 @@ function openMemo(v, race, od) {
     <h2>買い目メモ <small style="color:var(--sub)">${esc(v.name)} ${race.no}R</small></h2>
     <div class="card" style="margin-top:10px">
       <div class="orow"><span>合成オッズ</span><b style="font-size:20px">${synth ? synth.toFixed(1) + "倍" : "-"}</b></div>
+      <div class="orow"><span>目安オッズの合成 <small class="cnt">（的中確率 ${(psum * 100).toFixed(1)}%）</small></span>
+        <b style="font-size:20px" class="${synth && fairSynth && synth > fairSynth ? "plus" : ""}">${fairSynth ? fairSynth.toFixed(1) + "倍" : "-"}</b></div>
       <div class="orow">
         <select id="mmode"><option value="pay" ${state.memoMode === "pay" ? "selected" : ""}>払戻が揃う配分</option><option value="even" ${state.memoMode === "even" ? "selected" : ""}>均等配分</option></select>
         <span><input id="mtotal" class="amt" type="number" min="0" value="${Math.max(total / 100, list.length)}"><small>00円</small></span>
         <button class="pill2 on" id="mapply">変更</button>
       </div>
-      <div class="note">合計 ${total.toLocaleString()}円・${list.length}点。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。</div>
+      <div class="note">合計 ${total.toLocaleString()}円・${list.length}点。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。目安オッズの合成は、出目確率から見た「これだけつけば五分」の倍率で、合成オッズの方が大きければ（緑）確率のわりに割に合う買い方です。</div>
     </div>
     <div class="orow"><div class="seg"><button class="pill2 ${state.memoSort === "boat" ? "on" : ""}" data-ms="boat">枠番順</button><button class="pill2 ${state.memoSort === "odds" ? "on" : ""}" data-ms="odds">オッズ順</button></div>
       <span class="cnt">${od?.time ? "オッズ " + esc(od.time) : "締切時オッズ"}</span></div>
-    <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>購入金額</th><th>想定払戻<br>収支</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="5" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
+    <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>目安オッズ<br><small>出目確率</small></th><th>購入金額</th><th>想定払戻<br>収支</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
     ${list.length ? '<div style="text-align:center;margin-top:12px"><button class="pill2" id="mclear">すべての買い目を削除</button></div>' : ""}`;
   const re = () => openMemo(v, race, od);
   $("mclose").onclick = () => { closeModal(); drawOddsTab(v, race, true); };
