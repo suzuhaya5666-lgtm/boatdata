@@ -83,6 +83,7 @@
   .arebadge { font-size: 13px; font-weight: 700; padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
   .arebadge.l3 { background: #c92a2a; color: #fff; } .arebadge.l2 { background: #f76707; color: #fff; }
   .arebadge.l1 { background: #fff3bf; color: #8a5a00; } .arebadge.l0 { background: #e7f5ff; color: #1864ab; }
+  .arebadge.hot { background: linear-gradient(90deg,#c92a2a,#e8590c); color: #fff; } .arebadge.split { background: #f3d9fa; color: #862e9c; }
   .lane { display: grid; grid-template-columns: 52px 1fr auto 64px; align-items: center; border-top: 1px solid var(--line); min-height: 52px; }
   .lane .wk { align-self: stretch; display: flex; align-items: center; justify-content: center; font-size: 20px; font-weight: 800; }
   .lane .nm { padding: 0 12px; font-size: 18px; font-weight: 700; }
@@ -428,19 +429,20 @@ async function fillHomeAre() {
     const races = Object.values(v.races).sort((a, b) => a.no - b.no)
       .filter((r) => !r.payouts && (date > now.date || (r.deadline && r.deadline > now.time)));
     if (!races.length) continue;
-    const hits = [];
-    let nextA = null;
-    for (const [i, r] of races.entries()) {
-      let a = null;
-      try { a = areOf((await computeDeme({ ...r, _v: code }))?.prob, code); } catch (e) { a = null; }
+    const hits = [], hots = [];
+    for (const r of races) {
+      let a = null, o = null;
+      try { [a, o] = await Promise.all([computeDeme({ ...r, _v: code }).then((d) => areOf(d?.prob, code)), favOdds(code, r, date)]); } catch (e) { /* なし */ }
       if (state.screen !== "home" || state.date !== date) return;
-      if (i === 0) nextA = a;
-      if (i > 0 && a && a.lvl >= 2) hits.push(r.no);
+      const h = hotOf(a, o, code);
+      if (h.combo) hots.push(`<span class="arebadge hot">💥 ${r.no}R 激アツ</span>`);
+      else if (h.split) hots.push(`<span class="arebadge split">🎯 ${r.no}R 割れ</span>`);
+      if (a && a.lvl >= 2 && !h.combo) hits.push(r === races[0] ? `<span class="arebadge l${a.lvl}">${a.icon} 次${r.no}R</span>` : r.no);
     }
     const el = document.querySelector(`[data-hare="${code}"]`);
     if (!el) continue;
-    const nx = nextA && nextA.lvl >= 2 ? `<span class="arebadge l${nextA.lvl}">${nextA.icon} 次${races[0].no}R</span>` : "";
-    el.innerHTML = nx + (hits.length ? `<span class="harerest">🔥 ${hits.map((n) => n + "R").join("・")}</span>` : "");
+    const first = hits.filter((x) => typeof x === "string"), rest = hits.filter((x) => typeof x === "number");
+    el.innerHTML = hots.join("") + first.join("") + (rest.length ? `<span class="harerest">🔥 ${rest.map((n) => n + "R").join("・")}</span>` : "");
   }
 }
 
@@ -530,28 +532,86 @@ function areOf(prob, venue) {
   return { s, ...tbl.find((t) => s < t.lt) };
 }
 const areBadge = (a) => a && a.lvl >= 0 ? `<span class="arebadge l${a.lvl}">${a.icon} ${a.label}</span>` : "";
+// オッズ割れ: 3連単の1番人気が SPLIT 倍以上。締切前は最新のオッズ(5分おき)で判定し、下がったら消える
+const SPLIT = 12;
+const COMBO = ["07", "19"];  // 荒れ注意以上 × 割れ で万舟が増えた場(激アツ)
+async function getLiveRaw(hd, venue, no) {
+  const path = `data/live/${hd}/${venue}_${String(no).padStart(2, "0")}.json`;
+  try { const r = await fetch(RAW + path, { cache: "no-store" }); if (r.ok) return await r.json(); } catch (e) { /* なし */ }
+  return null;
+}
+async function favOdds(code, r, date) {
+  const hd = date.replace(/-/g, ""), now = nowJST();
+  let od = null, live = false;
+  if (r.payouts && Object.keys(r.payouts).length) od = await getOdds(hd, code, r.no);
+  else if (date === now.date && r.deadline) {
+    const [h, m] = r.deadline.split(":").map(Number), [nh, nm] = now.time.split(":").map(Number);
+    const left = h * 60 + m - (nh * 60 + nm);
+    if (left > 25 || left < -5) return null;
+    od = await getLiveRaw(hd, code, r.no); live = true;
+  }
+  const v = Object.values(od?.["3t"] || {}).filter((x) => x > 0);
+  if (v.length < 60) return null;
+  return { fav: Math.min(...v), time: od.time || null, live };
+}
+function hotOf(a, o, code) {
+  const split = o && o.fav >= SPLIT;
+  const combo = split && COMBO.includes(code) && a && a.lvl >= 2;
+  return { split, combo };
+}
+function hotBadge(h, o) {
+  if (h.combo) return `<span class="arebadge hot">💥 激アツ</span>`;
+  if (h.split) return `<span class="arebadge split">🎯 割れ ${o.fav.toFixed(1)}倍</span>`;
+  return "";
+}
 async function fillAre(races) {
   if (!ARE[state.venue]) return;
   const venue = state.venue, date = state.date;
   for (const r of races) {
-    let a = null;
-    try { a = areOf((await computeDeme(r))?.prob, venue); } catch (e) { a = null; }
-    if (state.venue !== venue || state.date !== date) return;
+    let a = null, o = null;
+    try { [a, o] = await Promise.all([computeDeme(r).then((d) => areOf(d?.prob, venue)), favOdds(venue, r, date)]); } catch (e) { /* なし */ }
+    if (state.screen !== "list" || state.venue !== venue || state.date !== date) return;
     const el = document.querySelector(`[data-are="${r.no}"]`);
-    if (el) el.innerHTML = areBadge(a);
+    const h = hotOf(a, o, venue);
+    if (el) el.innerHTML = (h.combo ? "" : areBadge(a)) + hotBadge(h, o);
   }
 }
-function areCard(prob, venue, vname) {
+async function fillAreOdds(race, a) {
+  const el = document.querySelector("[data-areodds]");
+  if (!el) return;
+  const o = await favOdds(state.venue, race, state.date);
+  const el2 = document.querySelector(`[data-areodds="${race.no}"]`);
+  if (!el2) return;
+  const h = hotOf(a, o, state.venue);
+  const combo = COMBO.includes(state.venue);
+  el2.innerHTML = !o ? `<span>オッズ割れ: 締切25分前から判定（1番人気${SPLIT}倍以上で表示）</span>`
+    : `<span>3連単1番人気 <b>${o.fav.toFixed(1)}倍</b>${o.time ? `（${esc(o.time)}時点）` : o.live ? "" : "（締切時）"}</span>${hotBadge(h, o) || "<span>割れなし</span>"}`;
+  const nt = document.querySelector(`[data-areoddsnote="${race.no}"]`);
+  if (nt) nt.textContent = combo
+    ? `1番人気${SPLIT}倍以上を「割れ」。この場は荒れ注意以上と割れが重なると万舟が約3割（最終オッズでの検証）なので「激アツ」にしています。オッズは締切に向けて下がりがちなので、基準を割ると消えます。`
+    : `1番人気${SPLIT}倍以上を「割れ」（最終オッズでの検証で万舟が約2割）。オッズは締切に向けて下がりがちなので、基準を割ると消えます。`;
+}
+function areCard(prob, venue, vname, race) {
   const a = areOf(prob, venue);
   if (!a) return "";
   const tbl = ARE[venue];
+  if (race) setTimeout(() => fillAreOdds(race, a), 0);
   return `<div class="card"><h2>荒れレースアラート ${areBadge(a)}</h2>
     <div class="meta"><span>出目確率の上位10点の合計 <b>${(a.s * 100).toFixed(1)}%</b></span><span>判定 <b>${a.label}</b></span></div>
+    ${race ? `<div class="meta" data-areodds="${race.no}"><span>オッズ確認中…</span></div>` : ""}
     <div class="tbl"><table class="cmp"><thead><tr><th>判定</th><th>上位10点の合計</th><th>万舟率</th><th>3連単<br>中央値</th><th>イン逃げ</th></tr></thead><tbody>
     ${tbl.map((t, i) => `<tr class="${t === tbl.find((x) => x.lvl === a.lvl) ? "hit" : ""}"><td>${t.icon} ${t.label}</td><td>${i ? (tbl[i - 1].lt * 100).toFixed(0) : 0}〜${t.lt < 2 ? (t.lt * 100).toFixed(0) + "%" : ""}</td><td>${t.man.toFixed(1)}%</td><td>${t.med.toLocaleString()}円</td><td>${t.nige}%</td></tr>`).join("")}
     </tbody></table></div>
-    <div class="note">出目確率が上位10点に集まっていないほど、展開が読みにくいレース。${esc(vname)}の過去約5,000レース（2024/1〜、枠なり）で、段ごとに実際に万舟（3連単1万円以上）になった割合です（場全体は約14%）。「荒れやすい」の目安で、荒れ注意でも万舟は5レースに1回ほど。</div></div>`;
+    <div class="note">出目確率が上位10点に集まっていないほど、展開が読みにくいレース。${esc(vname)}の過去約5,000レース（2024/1〜、枠なり）で、段ごとに実際に万舟（3連単1万円以上）になった割合です（場全体は約15%）。「荒れやすい」の目安で、荒れ注意でも万舟は5レースに1回ほど。</div>
+    ${race ? `<div class="note" data-areoddsnote="${race.no}"></div>` : ""}</div>`;
 }
+
+// 一覧・場選択の印は3分ごとに取り直す(オッズが下がったら消える)
+setInterval(() => {
+  if (document.hidden || !state.day) return;
+  if (state.screen === "home") fillHomeAre();
+  else if (state.screen === "list" && state.day.venues[state.venue]) fillAre(Object.values(state.day.venues[state.venue].races).sort((a, b) => a.no - b.no));
+}, 180000);
 
 // ---------------------------------------------------------------- レース詳細
 function drawDetail() {
@@ -1691,7 +1751,7 @@ async function drawDemeTab(v, race, keepPos) {
         入れ替えたい2つの枠を順にタップすると入れ替わります。</div>
       ${custom ? '<button class="pill2" id="resetOrder" style="margin-top:8px">' + (bi?.start?.length === 6 ? "展示進入" : "枠なり") + "に戻す</button>" : ""}
     </div>
-    ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name)}
+    ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race)}
     ${kimCardHtml(kimPredict(kimModel, model, adj.Z, order, racers), v.name)}
     ${featCard(model, adj)}
     <div class="card">
