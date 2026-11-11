@@ -28,8 +28,12 @@ from collect import load_grades  # noqa: E402
 M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走分)
 WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
-FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt"]
-FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち"]
+FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight"]
+FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線"]
+# 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
+GROUPS = [[0], [1], [2], [3], [4], [5], [6], [7, 8, 9]]
+GROUP_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示"]
+ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、今は蒲郡のみ)。コースの平均を引いて、速いほど大きくして使う
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
 KINDS = ["予選", "準優", "優勝戦", "選抜・特選"]  # レースの種別(それ以外は補正なし)
 
@@ -104,6 +108,7 @@ def build():
                 prior = np.zeros((7, 3))
                 prior[1:] = (v[1:, 1:4] + 1) / (v[1:, :1] + 6)
                 de = {e["boat"]: e for e in program_entries(day, code, race["no"])}
+                org = org_of(day, code, race["no"])
                 f = np.full((7, len(FEATURES)), np.nan)
                 for k in range(1, 7):
                     e = courses[k]
@@ -114,7 +119,8 @@ def build():
                     adj = normal if fc == 0 else (f_[0] / f_[1] if f_[1] >= 5 else normal + FDELTA[min(fc, 2)])
                     f[k] = [e.get("exh") or np.nan, b.get("nat_win") or np.nan, b.get("loc_win") or np.nan,
                             b["motor_2"] if b.get("motor_2") is not None else np.nan,
-                            CLS.get(b.get("class"), np.nan), adj, fc]
+                            CLS.get(b.get("class"), np.nan), adj, fc] + \
+                        [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
                 H.append(any(e.get("nat_win") is not None for e in de.values()))  # 出走表(勝率など)があるレースか
                 V.append(VENUE_IDX[code])
@@ -178,11 +184,51 @@ def fit(X, N, P, Y):
     return W_all, losses
 
 
+_org_cache = {}
+
+
+def org_of(day, code, no):
+    """オリジナル展示 {艇番: {lap, turn, straight}}。過去分(org_past)か、直前情報に保存した分。"""
+    import gzip
+    if code != "07":
+        return {}
+    if day not in _org_cache:
+        p = os.path.join(DATA, "org_past", f"{day:%Y}", f"{day:%Y%m%d}.json.gz")
+        d = {}
+        if os.path.exists(p):
+            with gzip.open(p, "rt", encoding="utf-8") as f:
+                d = json.load(f)
+        _org_cache[day] = d
+    key = f"{code}_{int(no):02d}"
+    o = _org_cache[day].get(key)
+    if o is None:
+        p = os.path.join(DATA, "before", f"{day:%Y%m%d}", f"{key}.json")
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                o = json.load(f).get("org")
+    return o or {}
+
+
+def org_transform(F, V):
+    """オリジナル展示: 場・コースごとの平均を引いて符号を逆に(速いほど大きく)。平均は画面でも使う。"""
+    cm = {}
+    for vi, c in enumerate(VCODES):
+        rows = V == vi
+        m = np.nanmean(F[rows][:, :, ORG], axis=0) if rows.any() else np.full((7, len(ORG)), np.nan)
+        if np.isnan(m[1:]).all():
+            continue
+        cm[c] = [[round(float(m[k, i]), 4) if not np.isnan(m[k, i]) else 0 for k in range(7)] for i in range(len(ORG))]
+        for i, fi in enumerate(ORG):
+            F[rows, :, fi] = -(F[rows, :, fi] - np.array(cm[c][i])[None, :])
+    return F, cm
+
+
 def standardize(F):  # noqa: E302
     """レース内の平均との差を、全体のばらつきで割る。欠けている値はレース平均(=0)。"""
     Z = F[:, 1:, :].copy()
     mean = np.nanmean(Z, axis=1, keepdims=True)
     Z = np.where(np.isnan(Z), mean, Z)
+    Z = np.nan_to_num(Z)  # レース全体で値がない材料(オリジナル展示のない場など)は0
     Z = Z - Z.mean(axis=1, keepdims=True)
     sd = Z.reshape(-1, Z.shape[2]).std(0)
     sd = np.where(sd == 0, 1, sd)
@@ -317,7 +363,11 @@ def main():
     X, N, P, Y, F, H, V, S, KD, first, last = build()
     W, losses = fit(X, N, P, Y)  # コース別成績の重みは全期間で
     prog = np.where(H)[0]        # 材料の係数は、出走表があるレースだけで決める
-    Zp, sd = standardize(F[prog])
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", RuntimeWarning)
+        F, org_cm = org_transform(F, V)
+        Zp, sd = standardize(F[prog])
     Z = np.zeros((len(Y), 7, len(FEATURES)))
     Z[prog] = Zp
     LQ = base_lq(X, N, P, W)
@@ -327,22 +377,23 @@ def main():
     W_tr, _ = fit(X[:prog[cut]], N[:prog[cut]], P[:prog[cut]], Y[:prog[cut]])
     LQ_tr = base_lq(X, N, P, W_tr)
     combos = {}
-    nfeat = len(FEATURES)
-    for mask in range(1 << (nfeat + 1)):
-        feats = [i for i in range(nfeat) if mask >> i & 1]
-        use_cb = bool(mask >> nfeat & 1)
+    ng = len(GROUPS)
+    for mask in range(1 << (ng + 1)):
+        feats = [i for g in range(ng) if mask >> g & 1 for i in GROUPS[g]]
+        use_cb = bool(mask >> ng & 1)
         c_tr, b_tr = fit_logit(LQ_tr, Z, Y, V, S, KD, feats, use_cb, rows=tr)
         ev = evaluate(LQ_tr, Z, Y, V, S, KD, c_tr, b_tr, te)
         c_all, b_all = fit_logit(LQ, Z, Y, V, S, KD, feats, use_cb, rows=prog)
         combos[str(mask)] = {"coef": c_all, "cbias": b_all, "eval": ev}
         print(f"組み合わせ {mask:3d}: {ev}")
-    full = combos[str((1 << (nfeat + 1)) - 1)]
+    full = combos[str((1 << (ng + 1)) - 1)]
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"month": f"{today:%Y-%m}", "m": M, "races": int(len(Y)),
                    "from": first.isoformat(), "to": last.isoformat(), "loss": losses,
                    "W": np.round(W, 4).tolist(),
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
+                   "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
     print(f"重みを作成: {len(Y)}レース(材料の係数は {len(prog)}レース)、組み合わせ {len(combos)}通り")

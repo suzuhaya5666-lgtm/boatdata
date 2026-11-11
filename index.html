@@ -1221,12 +1221,21 @@ const CLS_NUM = { A1: 4, A2: 3, B1: 2, B2: 1 };
 function demeAdjust(q, order, ents, racers, bi, model, race) {
   if (!model.coef) return { q, used: [] };
   // 選んだ材料の組み合わせで決め直した係数を使う
-  const nf = model.features.length;
-  const mask = state.featMask ?? ((1 << (nf + 1)) - 1);
+  const G = featGroups(model);
+  const ng = G.length;
+  const gOf = {};
+  G.forEach((g, gi) => g.forEach((i) => { gOf[i] = gi; }));
+  const mask = state.featMask ?? ((1 << (ng + 1)) - 1);
   const combo = model.combos?.[mask] || { coef: model.coef, cbias: model.cbias };
   model = { ...model, coef: combo.coef, cbias: combo.cbias };
-  const val = (f, b) => {
+  const ORGK = ["lap", "turn", "straight"];
+  const val = (f, b, k) => {
     const e = ents[b] || {};
+    if (ORGK.includes(f)) {  // オリジナル展示: 場・コースの平均を引いて、速いほど大きく
+      const x = bi?.org?.[b]?.[f];
+      const cm = model.org_cm?.[state.venue]?.[ORGK.indexOf(f)];
+      return x != null && cm ? -(x - cm[k]) : null;
+    }
     if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
     if (f === "class") return CLS_NUM[e.class] ?? null;
     if (f === "avg_st") return racers[b]?.fst?.st_adj ?? racers[b]?.sheet?.all?.st?.total?.avg ?? null;  // F持ちならF持ち時の平均ST
@@ -1237,9 +1246,10 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
   const Z = {};
   for (let k = 1; k <= 6; k++) Z[k] = [];
   model.features.forEach((f, i) => {
-    const raw = [1, 2, 3, 4, 5, 6].map((k) => val(f, order[k]));
+    const raw = [1, 2, 3, 4, 5, 6].map((k) => val(f, order[k], k));
     const have = raw.filter((x) => x != null && !Number.isNaN(x));
-    if (have.length && (mask >> i & 1)) used.push(model.feature_names[i]);
+    const gname = (model.group_names || model.feature_names)[gOf[i]];
+    if (have.length && (mask >> gOf[i] & 1) && !used.includes(gname)) used.push(gname);
     const mean = have.length ? have.reduce((a, b) => a + b, 0) / have.length : 0;
     [1, 2, 3, 4, 5, 6].forEach((k, n) => { Z[k][i] = ((raw[n] ?? mean) - mean) / model.sd[i]; });
   });
@@ -1254,8 +1264,12 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     const sum = ex.reduce((a, b) => a + b, 0);
     [1, 2, 3, 4, 5, 6].forEach((k, n) => { out[k][j] = ex[n] / sum; });
   }
-  if (mask >> nf & 1) used.push("コース補正");
+  if (mask >> ng & 1) used.push("コース補正");
   return { q: out, used, ev: combo.eval };
+}
+// 材料のまとまり(オン・オフの単位)。古い重みファイルは材料1つずつ
+function featGroups(model) {
+  return model.groups || model.features.map((_, i) => [i]);
 }
 // コース補正: 場ごと(場×コース) + SG・G1のとき(全場共通)。古い形式(全場共通の配列)にも対応
 // レースの種別(予選・準優・優勝戦・選抜/特選)の補正も足す。race がないときは種別の補正なし
@@ -1452,9 +1466,9 @@ async function drawDemeTab(v, race) {
         重みは過去${model.races.toLocaleString()}レース（${model.from}〜${model.to}）で、実際の着順に一番合うように毎月作り直しています。</div>
       <div class="note" style="font-size:13px;line-height:1.7;margin-top:8px">
         そのうえで、${(model.feature_names || []).join("・")}をレース内で比べた差を、着ごとの係数で足しています（係数も毎月作り直し）。展示前は展示タイムを使わずに計算し、展示が取れたら自動で入ります。
-        平均STは、F持ちの選手はF持ちのときの平均ST（本数が少なければ普段の平均＋F1本0.018秒・F2本以上0.061秒）を使い、今の期のFの数も材料に入れています。
+        オリジナル展示（一周・まわり足・直線、今は蒲郡のみ）は、コースごとの平均との差で比べています（内側ほど速く測られる分を除くため）。平均STは、F持ちの選手はF持ちのときの平均ST（本数が少なければ普段の平均＋F1本0.018秒・F2本以上0.061秒）を使い、今の期のFの数も材料に入れています。
         「コース補正」は場ごとのコース別の補正で、SG・G1のときはイン有利の分（全場共通）を、さらにレースの種別（予選・準優・優勝戦・選抜/特選）ごとの補正（全場共通）を上乗せしています。係数を決めるのには、前付けのない（枠なりの）レースだけを使っています。</div>
-      ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? ((1 << (model.features.length + 1)) - 1)] || {}) }, race)}
+      ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? ((1 << (featGroups(model).length + 1)) - 1)] || {}) }, race)}
       <div class="tbl">${weightTable(model)}</div>
     </div>`;
 
@@ -1473,8 +1487,8 @@ async function drawDemeTab(v, race) {
     drawDemeTab(v, race);
   });
   document.querySelectorAll("#feats [data-f]").forEach((b) => b.onclick = () => {
-    const nf = model.features.length;
-    const cur = state.featMask ?? ((1 << (nf + 1)) - 1);
+    const ng = featGroups(model).length;
+    const cur = state.featMask ?? ((1 << (ng + 1)) - 1);
     state.featMask = cur ^ (1 << Number(b.dataset.f));
     drawDemeTab(v, race);
   });
@@ -1501,10 +1515,10 @@ async function drawDemeTab(v, race) {
 
 function featCard(model, adj) {
   if (!model.combos) return "";
-  const nf = model.features.length;
-  const all = (1 << (nf + 1)) - 1;
+  const ng = featGroups(model).length;
+  const all = (1 << (ng + 1)) - 1;
   const mask = state.featMask ?? all;
-  const names = [...model.feature_names, "コース補正"];
+  const names = [...(model.group_names || model.feature_names), "コース補正"];
   const chips = names.map((nm, i) => `<button class="pill2 ${mask >> i & 1 ? "on" : ""}" data-f="${i}">${nm}</button>`).join("");
   const ev = adj.ev;
   const best = model.combos[all].eval;
