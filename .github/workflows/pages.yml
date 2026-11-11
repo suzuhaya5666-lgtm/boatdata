@@ -32,7 +32,9 @@ jobs:
           python-version: "3.12"
 
       - name: 成績の集計
-        run: python scripts/stats.py
+        run: |
+          pip install --quiet numpy
+          python scripts/stats.py
 
       - name: 公開するファイルをまとめる
         run: |
