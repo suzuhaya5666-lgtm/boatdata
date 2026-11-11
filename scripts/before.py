@@ -14,6 +14,7 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect import DATA, JST, VENUES  # noqa: E402
+import orgtenji  # noqa: E402
 
 URL = "https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={hd}"
 # 締切の何分前から何分後まで取りに行くか(GitHub の定期実行は遅れることがあるので広めに)
@@ -157,7 +158,12 @@ def fetch_once():
             if not any(e["exh"] is not None for e in info["entries"].values()):
                 print(f"{VENUES[code]}{no}R: 展示前")
                 continue
-            info.update({"complete": complete(info), "fetched": now.strftime("%H:%M")})
+            if code in orgtenji.VENUES:  # 場独自のオリジナル展示(一周・まわり足・直線)
+                org = orgtenji.fetch(code, today, int(no))
+                if org:
+                    info["org"] = org
+            done = complete(info) and (code not in orgtenji.VENUES or "org" in info)
+            info.update({"complete": done, "fetched": now.strftime("%H:%M")})
             os.makedirs(outdir, exist_ok=True)
             with open(path, "w", encoding="utf-8") as f:
                 json.dump(info, f, ensure_ascii=False, separators=(",", ":"))

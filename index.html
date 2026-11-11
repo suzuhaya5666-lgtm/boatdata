@@ -1111,6 +1111,18 @@ async function drawExhTab(v, race) {
   const best = Math.min(...times.filter((x) => x != null));
   const sorted = [...new Set(times.filter((x) => x != null))].sort((a, b) => a - b);
   const rcls = (x) => x == null ? "" : x === sorted[0] ? "r1" : x === sorted[1] ? "r2" : "";
+  // オリジナル展示(場独自の計測。今は蒲郡のみ): 小さいほど良い
+  const org = bi?.org;
+  const OK = [["lap", "一周"], ["turn", "まわり<br>足"], ["straight", "直線"]];
+  const orgCls = {};
+  if (org) OK.forEach(([k]) => {
+    const vs = [...new Set(Object.values(org).map((o) => o[k]).filter((x) => x != null))].sort((a, b) => a - b);
+    orgCls[k] = (x) => x == null ? "" : x === vs[0] ? "r1" : x === vs[1] ? "r2" : "";
+  });
+  const orgTd = (b) => org ? OK.map(([k]) => {
+    const x = org[b]?.[k];
+    return `<td class="${orgCls[k](x)}">${x != null ? x.toFixed(2) : "-"}</td>`;
+  }).join("") : "";
   const rows = (order || [1, 2, 3, 4, 5, 6].map((b) => ({ course: b, boat: b }))).map((o) => {
     const e = ents[o.boat] || { boat: o.boat };
     const b = bi?.entries?.[o.boat] || {};
@@ -1119,6 +1131,7 @@ async function drawExhTab(v, race) {
     return `<tr>
       <td class="${moved ? "moved" : ""}">${order ? o.course : "-"}</td>${lane(e)}
       <td class="${rcls(x)}">${x != null ? x.toFixed(2) : "-"}${x != null && x !== best ? `<br><small class="cnt">+${(x - best).toFixed(2)}</small>` : ""}</td>
+      ${orgTd(o.boat)}
       <td>${o.st ? esc(o.st) : "-"}</td>
       <td>${b.tilt != null ? b.tilt.toFixed(1) : "-"}</td>
       <td>${b.propeller ? `<span class="new">${esc(b.propeller)}</span>` : "-"}</td>
@@ -1137,10 +1150,10 @@ async function drawExhTab(v, race) {
     <div class="card">
       <h2>展示情報</h2>
       ${wline}
-      <div class="tbl"><table class="cmp exh"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>展示<br>タイム</th>
+      <div class="tbl"><table class="cmp exh"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>展示<br>タイム</th>${org ? OK.map(([, l]) => `<th>${l}</th>`).join("") : ""}
         <th>${order === bi?.start ? "展示ST" : "ST"}</th><th>チルト</th><th>プロペラ</th><th>部品交換</th><th>体重</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
-      <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${status}</div>
+      <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${org ? "一周・まわり足・直線は場独自の計測（オリジナル展示）で、どれも小さいほど良く、1番を赤、2番を黄。" : ""}${status}</div>
     </div>`;
 }
 
