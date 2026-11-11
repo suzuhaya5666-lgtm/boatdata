@@ -16,6 +16,8 @@ import json
 import os
 import re
 import statistics
+
+import numpy as np
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -224,6 +226,28 @@ def f_state(recs, today):
     return {"f": f, "st_adj": round(adj, 4) if adj is not None else None}
 
 
+KM3 = ("差し", "まくり", "まくり差し")
+
+
+def kim_counts(recs):
+    """全期間の決まり手の回数。1コース: 出走と負けた決まり手、2〜6コース: 出走と勝った決まり手。"""
+    c1 = [0, 0, 0, 0]
+    ck = {k: [0, 0, 0, 0] for k in range(2, 7)}
+    for _, _, c, place, own, lost, _, _, _, _, _ in recs:
+        if c == 1:
+            c1[0] += 1
+            if lost in KM3:
+                c1[1 + KM3.index(lost)] += 1
+        elif 2 <= c <= 6:
+            ck[c][0] += 1
+            if own in KM3:
+                ck[c][1 + KM3.index(own)] += 1
+    return c1, ck
+
+
+KIM_M = 20  # 回数が少ない選手は全体の率に20走分寄せる(出目の検証と同じ)
+
+
 def bucket(recs):
     """枠別着率と決まり手。"""
     b = {"n": 0, "p1": 0, "p2": 0, "p3": 0, "win": {}, "lost": {}, "nigashi": 0}
@@ -341,6 +365,13 @@ def main():
     # ---- 選手(直近1年)
     year_ago = last - dt.timedelta(days=365)
     rperiod = {**period, "from": (year_ago + dt.timedelta(days=1)).isoformat()}
+    # 決まり手率(全期間・全場、少ない選手は全体の率に寄せる)
+    kc = {regno: kim_counts(recs) for regno, recs in hist.items()}
+    g1 = np.sum([v[0] for v in kc.values()], axis=0)
+    gk = {k: np.sum([v[1][k] for v in kc.values()], axis=0) for k in range(2, 7)}
+
+    def shrink(cnt, g):
+        return [round((cnt[1 + i] + KIM_M * g[1 + i] / g[0]) / (cnt[0] + KIM_M), 4) for i in range(3)]
     for regno, recs in hist.items():
         recs1y = [r for r in recs if r[0] > year_ago]
         if not recs1y:
@@ -352,7 +383,9 @@ def main():
               "sheet": {cat: sheet(rs) for cat in CATS
                         for rs in [[r for r in recs1y if in_cat(cat, r[7])]] if rs},
               "bycourse": bycourse(recs, last),
-              "fst": f_state(recs, dt.datetime.now(JST).date())}
+              "fst": f_state(recs, dt.datetime.now(JST).date()),
+              "kim": {"c1": {"n": kc[regno][0][0], "rate": shrink(kc[regno][0], g1)},
+                      **{str(k): {"n": kc[regno][1][k][0], "rate": shrink(kc[regno][1][k], gk[k])} for k in range(2, 7)}}}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:
             json.dump(rr, f, ensure_ascii=False, separators=(",", ":"))
 

@@ -1064,6 +1064,35 @@ async function drawRacerTab(v, race) {
     return x ? pcell(x[0], x[1], j === 0 ? "" : rk2[j][i]) : "<td>-</td>";
   }).join("")}</tr>`).join("");
 
+  // 3年分の決まり手率(出目の検証で使った値。少ない選手は全体の率に寄せてある)と、組み合わせの判定
+  const KT = { sasare: [0.095, 0.137], sashi: [0.065, 0.101], makurare: [0.114, 0.165], makuri: [0.048, 0.075], mzare: [0.096, 0.129], mz: [0.037, 0.061] };
+  const lv = (x, t) => x == null ? null : x < t[0] ? "低" : x < t[1] ? "中" : "高";
+  const kimOf = (i, c) => files[i]?.kim?.[c]?.rate || null;
+  const i1 = race.entries.findIndex((e) => e.boat === 1);
+  const k1 = i1 >= 0 ? kimOf(i1, "c1") : null;
+  const kr = (c) => kimOf(race.entries.findIndex((e) => e.boat === c), String(c));
+  const pc = (x) => x == null ? "-" : (x * 100).toFixed(1) + "%";
+  const lvTag = (l) => l ? `<small class="cnt">${l}</small>` : "";
+  const mak34 = Math.max(kr(3)?.[1] ?? 0, kr(4)?.[1] ?? 0), mz34 = Math.max(kr(3)?.[2] ?? 0, kr(4)?.[2] ?? 0);
+  const combos = k1 ? [
+    { name: "1コースが差されにくい × 2コースの差しが得意", hit: lv(k1[0], KT.sasare) === "低" && lv(kr(2)?.[0], KT.sashi) === "高",
+      note: "過去の該当レースでは1コースが予測より粘った（1着 予測66.1%→実際71.8%、5場・直近1年1,187R）" },
+    { name: "1コースがまくり差されにくい × 3・4コースのまくり差しが得意", hit: lv(k1[2], KT.mzare) === "低" && lv(mz34, KT.mz) === "高",
+      note: "過去の該当レースでは1コースが予測より粘った（1着 予測64.2%→実際71.7%、5場・直近1年1,212R）" },
+    { name: "1コースがまくられやすい × 3・4コースのまくりが得意", hit: lv(k1[1], KT.makurare) === "高" && lv(mak34, KT.makuri) === "高",
+      note: "過去の該当レースでは4コースが予測より勝った（4コース1着 予測15.3%→実際16.6%、5場・直近1年998R。蒲郡は16.7%→19.9%）" },
+  ] : [];
+  const kimCard = k1 ? `
+    <div class="card">
+      <h2>決まり手の相性（3年分）</h2>
+      <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>差され</th><th>まくられ</th><th>まくられ差</th></tr></thead>
+        <tbody><tr>${lane(race.entries[i1])}<td>${pc(k1[0])}${lvTag(lv(k1[0], KT.sasare))}</td><td>${pc(k1[1])}${lvTag(lv(k1[1], KT.makurare))}</td><td>${pc(k1[2])}${lvTag(lv(k1[2], KT.mzare))}</td></tr></tbody></table></div>
+      <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>差し</th><th>まくり</th><th>まくり差し</th></tr></thead>
+        <tbody>${race.entries.filter((e) => e.boat >= 2).map((e) => { const r = kr(e.boat); return `<tr>${lane(e)}<td>${pc(r?.[0])}${e.boat === 2 ? lvTag(lv(r?.[0], KT.sashi)) : ""}</td><td>${pc(r?.[1])}${[3, 4].includes(e.boat) ? lvTag(lv(r?.[1], KT.makuri)) : ""}</td><td>${pc(r?.[2])}${[3, 4].includes(e.boat) ? lvTag(lv(r?.[2], KT.mz)) : ""}</td></tr>`; }).join("")}</tbody></table></div>
+      <div style="margin-top:8px">${combos.map((c) => `<div class="note" style="${c.hit ? "color:#e03131;font-weight:700" : "color:#adb5bd"}">${c.hit ? "● 該当" : "○ 該当しない"}：${c.name}${c.hit ? `<br><span style="font-weight:400;color:var(--ink)">${c.note}</span>` : ""}</div>`).join("")}</div>
+      <div class="note">全場・3年分で、1号艇は1コースのとき、2〜6号艇はその枠と同じコースのときの率です。走った回数が少ない選手は、全体の率に20走分寄せています。低・中・高は、5場のレース全体を3等分した目安です。出目確率にはまだ入れていません（検証中）。</div>
+    </div>` : "";
+
   $("view-race").innerHTML = `
     <div class="card">
       <h2>枠別着率</h2>
@@ -1082,7 +1111,7 @@ async function drawRacerTab(v, race) {
       <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>逃し</th><th>差し</th><th>まくり</th><th>まくり差し</th></tr></thead>
         <tbody>${t2b}</tbody></table></div>
       <div class="note">1号艇は1コースで走ったとき、逃げ切った率と、差し・まくり・まくり差しで負けた率。2〜6号艇はそのコースで、差し・まくり・まくり差しで勝った率。逃しは2コースで1コースに逃げられた率。</div>
-    </div>`;
+    </div>${kimCard}`;
   ["rg", "kg"].forEach((id) => $(id).querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; drawRacerTab(v, race); }));
   $("rp").querySelectorAll("button").forEach((b) => b.onclick = () => { state.rp = b.dataset.p; drawRacerTab(v, race); });
   $("kp").querySelectorAll("button").forEach((b) => b.onclick = () => { state.kp = b.dataset.p; drawRacerTab(v, race); });
