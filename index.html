@@ -141,6 +141,9 @@
   .slot.cutbtn.on .mini { opacity: .35; }
   .slot.cutbtn.on small { color: #e03131; font-weight: 800; }
   tr.cutrow td { color: #adb5bd; }
+  .ns { display: inline-block; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 999px; margin-right: 4px; }
+  .ns-adopted { background: #d3f9d8; color: #2b8a3e; } .ns-display { background: #e7f5ff; color: #1971c2; }
+  .ns-rejected { background: #f1f3f5; color: #868e96; } .ns-recheck { background: #fff4e6; color: #e8590c; }
   .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
   td.hz60 { background: #ffc9c9; font-weight: 800; }
   td.hz55 { background: #ffe3e3; }
@@ -253,6 +256,7 @@
 
 <main id="view-race"></main>
 <main id="view-venue" hidden></main>
+<main id="view-notes" hidden></main>
 <main id="view-bets" hidden>
   <div class="card" style="color:var(--sub)">舟券の収支記録は次の段階で作ります。</div>
 </main>
@@ -260,6 +264,7 @@
 <nav>
   <button class="on" data-view="race">レース</button>
   <button data-view="venue">場データ</button>
+  <button data-view="notes">解析ノート</button>
   <button data-view="bets">収支</button>
 </nav>
 <div id="modal" hidden><div class="sheet" id="sheet"></div></div>
@@ -1209,7 +1214,7 @@ async function drawExhTab(v, race) {
 }
 
 // 偏差値ごとの着率表(3年分)。このレースの各艇が入る段に印をつける
-function hensaCard(hz, hv, courseOf) {
+function hensaCard(hz, hv, courseOf, inVenue) {
   const key = state.hensaKey || "sum";
   const names = { sum: "合計", ...Object.fromEntries(hz.keys.map((k, i) => [k, hz.names[i]])) };
   const tab = hz.tables[key];
@@ -1234,7 +1239,7 @@ function hensaCard(hz, hv, courseOf) {
       }).join("")}</tr>`).join("")}
       <tr><td>平均</td>${hz.avg.map((a) => `<td>${(a.r1 * 100).toFixed(1)}<br>${(a.r2 * 100).toFixed(1)}<br><b>${(a.r3 * 100).toFixed(1)}</b></td>`).join("")}</tr>
     </tbody></table></div>
-    <div class="note">上から1着率・2連対率・<b>3連対率</b>（%）。蒲郡の3年分（${hz.races.toLocaleString()}レース、前付けなし）。3連対率がコース平均より5ポイント以上高い段は赤、低い段は青。${hv ? "枠番の印は、このレースの各艇が入る段です。" : "展示が出ると、このレースの各艇が入る段に印がつきます。"}</div></div>`;
+    <div class="note">上から1着率・2連対率・<b>3連対率</b>（%）。蒲郡の3年分（${hz.races.toLocaleString()}レース、前付けなし）。3連対率がコース平均より5ポイント以上高い段は赤、低い段は青。${inVenue ? "レースの展示タブでは、そのレースの各艇が入る段に印がつきます。" : hv ? "枠番の印は、このレースの各艇が入る段です。" : "展示が出ると、このレースの各艇が入る段に印がつきます。"}</div></div>`;
 }
 
 // ---------------------------------------------------------------- 出目確率
@@ -1738,9 +1743,65 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   $("view-race").hidden = state.tab !== "race";
   $("view-venue").hidden = state.tab !== "venue";
   $("view-bets").hidden = state.tab !== "bets";
+  $("view-notes").hidden = state.tab !== "notes";
   draw();
   if (state.tab === "venue") renderVenue();
+  if (state.tab === "notes") renderNotes();
 }));
+
+// ---------------------------------------------------------------- 解析ノート
+async function renderNotes() {
+  const box = $("view-notes");
+  let nt;
+  try { nt = await getJSON("data/notes/notes.json"); } catch (e) {
+    box.innerHTML = '<div class="empty">解析ノートがまだありません。</div>'; return;
+  }
+  const L = nt.status_labels;
+  const f = state.noteFilter || "all";
+  const cnt = (k) => nt.items.filter((x) => x.status === k).length;
+  const items = nt.items.filter((x) => f === "all" || x.status === f);
+
+  box.innerHTML = `
+    <div class="card">
+      <h2>解析ノート</h2>
+      <div class="note">これまでの分析の結果と、出目確率に入れたかどうか。「再計算待ち」はデータが増えたら確かめ直す項目です。項目名と一緒に頼めば、再計算や印の付け替えをします。更新 ${esc(nt.updated)}</div>
+      <div class="pills" style="margin-top:8px">${[["all", `すべて ${nt.items.length}`], ...Object.entries(L).map(([k, l]) => [k, `${l.replace(/\(.*\)/, "")} ${cnt(k)}`])]
+        .map(([k, l]) => `<button class="pill2 ${f === k ? "on" : ""}" data-nf="${k}">${esc(l)}</button>`).join("")}</div>
+    </div>
+    ${items.map((x) => `<div class="card">${noteItemHtml(x, L)}</div>`).join("")}`;
+  box.querySelectorAll("[data-nf]").forEach((b) => b.onclick = () => { state.noteFilter = b.dataset.nf; renderNotes(); });
+}
+
+function noteItemHtml(x, L) {
+  const tbl = (t) => `<div class="note" style="margin-top:6px;font-weight:700">${esc(t.title)}</div>
+    <div class="tbl"><table class="cmp"><thead><tr>${t.head.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>
+    <tbody>${t.rows.map((r) => `<tr>${r.map((c, i) => `<td${i === 0 ? ' style="text-align:left"' : ""}>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+  return `<details>
+    <summary style="cursor:pointer"><span class="ns ns-${x.status}">${esc(L[x.status])}</span> <b>${esc(x.title)}</b>
+      <div class="note">${esc(x.venue)} ・ ${esc(x.data)} ・ ${esc(x.date)}</div></summary>
+    <div style="margin-top:8px;font-size:14px;line-height:1.7">${esc(x.summary)}</div>
+    ${(x.tables || []).map(tbl).join("")}
+    ${x.note ? `<div class="note" style="margin-top:6px">${esc(x.note)}</div>` : ""}
+    ${x.recheck ? `<div class="note" style="margin-top:6px;color:#e8590c;font-weight:700">再計算: ${esc(x.recheck)}</div>` : ""}
+  </details>`;
+}
+// 場データタブの「この場の専用データ」: 平均決まり手、偏差値ごとの着率、解析ノートのこの場の項目
+async function venueExtra(code, name) {
+  const [km, hz, nt] = await Promise.all([cached("data/model/kimarite.json"), cached("data/model/hensa.json"), cached("data/notes/notes.json")]);
+  let html = "";
+  const vm = km?.venues?.[code];
+  if (vm) {
+    const rows = km.alt.map(([k, t], a) => ({ k, t, p: vm.avg[a] })).filter((r) => r.p >= 0.01).sort((a, b) => b.p - a.p);
+    html += `<div class="card"><h2>${esc(name)} 平均の決まり手</h2>
+      <div class="tbl"><table class="cmp"><thead><tr><th>決まり手</th><th>率</th></tr></thead><tbody>
+      ${rows.map((r) => `<tr><td style="text-align:left">${r.k ? r.k + "コース " : ""}${r.t === "その他" ? "抜き・恵まれなど" : r.t}</td><td>${(r.p * 100).toFixed(1)}%</td></tr>`).join("")}</tbody></table></div>
+      <div class="note">3年分（${vm.races.toLocaleString()}レース、前付けなし）。出目確率タブの「予想決まり手」は、この平均にレースごとの差を足したもの。</div></div>`;
+  }
+  if (hz?.[code]) html += hensaCard(hz[code], null, (b) => b, true);
+  const mine = (nt?.items || []).filter((x) => x.venue.includes(name));
+  if (mine.length) html += `<div class="card"><h2>${esc(name)} の解析ノート</h2>${mine.map((x) => `<div style="border-top:1px solid var(--line);padding:8px 0">${noteItemHtml(x, nt.status_labels)}</div>`).join("")}</div>`;
+  return html;
+}
 
 // ---------------------------------------------------------------- 集計データ
 const pct = (a, n) => n ? (a / n * 100).toFixed(1) + "%" : "-";
@@ -1793,7 +1854,13 @@ async function renderVenue() {
     ${vs.st34 ? `<div class="card"><h2>3・4コースの平均ST差と各コースの成績</h2>
       <div class="note" style="margin-bottom:6px">差＝3コースの選手の平均ST − 4コースの選手の平均ST（どちらもそのコースでの、そのレースより前の平均）。各欄は 1着率 / 2連対率 / 3連対率（%）。グレードの切り替えは効きません。</div>
       <h3 class="oh">${esc(vv.name)}</h3>${st34Table(vs.st34.venues[code])}
-      <h3 class="oh">全国（江戸川を除く23場）</h3>${st34Table(vs.st34.overall)}</div>` : ""}`;
+      <h3 class="oh">全国（江戸川を除く23場）</h3>${st34Table(vs.st34.overall)}</div>` : ""}
+    <div id="vextra"></div>`;
+  venueExtra(code, vv.name).then((h) => {
+    const el = $("vextra"); if (!el) return;
+    el.innerHTML = h;
+    el.querySelectorAll("[data-hkey]").forEach((b) => b.onclick = () => { state.hensaKey = b.dataset.hkey; renderVenue(); });
+  });
   $("vg").querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; renderVenue(); });
   box.querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => {
     state.venue = b.dataset.sv; store.set("venue", state.venue); renderVenue();
