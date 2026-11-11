@@ -1189,7 +1189,7 @@ function demeQ(order, racers, vstat, model) {
 }
 // 材料(展示タイム・勝率・モーター・級別・平均ST)を係数で足す
 const CLS_NUM = { A1: 4, A2: 3, B1: 2, B2: 1 };
-function demeAdjust(q, order, ents, racers, bi, model) {
+function demeAdjust(q, order, ents, racers, bi, model, race) {
   if (!model.coef) return { q, used: [] };
   // 選んだ材料の組み合わせで決め直した係数を使う
   const nf = model.features.length;
@@ -1218,7 +1218,7 @@ function demeAdjust(q, order, ents, racers, bi, model) {
   for (let k = 1; k <= 6; k++) out[k] = [0, 0, 0];
   for (let j = 0; j < 3; j++) {
     const c = model.coef[j];
-    const cb = biasFor(model.cbias?.[j]);
+    const cb = biasFor(model.cbias?.[j], race);
     const sc = [1, 2, 3, 4, 5, 6].map((k) => c[0] * Math.log(q[k][j]) + Z[k].reduce((a, z, i) => a + c[i + 1] * z, 0) + cb[k]);
     const mx = Math.max(...sc);
     const ex = sc.map((x) => Math.exp(x - mx));
@@ -1229,13 +1229,23 @@ function demeAdjust(q, order, ents, racers, bi, model) {
   return { q: out, used, ev: combo.eval };
 }
 // コース補正: 場ごと(場×コース) + SG・G1のとき(全場共通)。古い形式(全場共通の配列)にも対応
-function biasFor(cb) {
+// レースの種別(予選・準優・優勝戦・選抜/特選)の補正も足す。race がないときは種別の補正なし
+function raceKind(name) {
+  name = name || "";
+  if (name.includes("優勝") && !name.includes("準")) return "優勝戦";
+  if (name.includes("準優")) return "準優";
+  if (name.includes("予選")) return "予選";
+  if (["選抜", "特選", "特賞", "ドリーム"].some((x) => name.includes(x))) return "選抜・特選";
+  return null;
+}
+function biasFor(cb, race) {
   if (!cb) return [0, 0, 0, 0, 0, 0, 0];
   if (Array.isArray(cb)) return cb;
   const vb = cb.venues?.[state.venue] || [0, 0, 0, 0, 0, 0, 0];
   const g = state.day?.venues?.[state.venue]?.grade;
   const sg = g === "SG" || g === "G1";
-  return vb.map((x, k) => x + (sg ? cb.sgg1?.[k] || 0 : 0));
+  const kd = race ? cb.kinds?.[raceKind(race.name)] : null;
+  return vb.map((x, k) => x + (sg ? cb.sgg1?.[k] || 0 : 0) + (kd ? kd[k] || 0 : 0));
 }
 function demeTri(q) {
   const out = [];
@@ -1267,7 +1277,7 @@ async function computeDeme(race) {
   let base = [0, 1, 2, 3, 4, 5, 6];
   if (bi?.start?.length === 6) base = [0, ...bi.start.map((s) => s.boat)];
   const order = state.orders?.[`${state.date}_${state.venue}_${race.no}`] || base;
-  const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model);
+  const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model, race);
   const tri = demeTri(adj.q).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
   const prob = {};  // 券種 -> {組番: 確率}
   const add = (bet, k, p) => { (prob[bet] = prob[bet] || {})[k] = (prob[bet][k] || 0) + p; };
@@ -1309,7 +1319,7 @@ async function drawDemeTab(v, race) {
   const order = state.orders[key] || base;
   const custom = !!state.orders[key];
 
-  const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model);
+  const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model, race);
   const q = adj.q;
   const hasExh = adj.used.includes("展示タイム");
   const boatOf = (c) => order[c];
@@ -1414,8 +1424,8 @@ async function drawDemeTab(v, race) {
       <div class="note" style="font-size:13px;line-height:1.7;margin-top:8px">
         そのうえで、${(model.feature_names || []).join("・")}をレース内で比べた差を、着ごとの係数で足しています（係数も毎月作り直し）。展示前は展示タイムを使わずに計算し、展示が取れたら自動で入ります。
         平均STは、F持ちの選手はF持ちのときの平均ST（本数が少なければ普段の平均＋F1本0.018秒・F2本以上0.061秒）を使い、今の期のFの数も材料に入れています。
-        「コース補正」は場ごとのコース別の補正で、SG・G1のときはイン有利の分（全場共通）を上乗せしています。係数を決めるのには、前付けのない（枠なりの）レースだけを使っています。</div>
-      ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? ((1 << (model.features.length + 1)) - 1)] || {}) })}
+        「コース補正」は場ごとのコース別の補正で、SG・G1のときはイン有利の分（全場共通）を、さらにレースの種別（予選・準優・優勝戦・選抜/特選）ごとの補正（全場共通）を上乗せしています。係数を決めるのには、前付けのない（枠なりの）レースだけを使っています。</div>
+      ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? ((1 << (model.features.length + 1)) - 1)] || {}) }, race)}
       <div class="tbl">${weightTable(model)}</div>
     </div>`;
 
@@ -1477,7 +1487,7 @@ function featCard(model, adj) {
       ${mask !== all ? `全部使うと 3連単上位10点 ${best.tri10}%。<button class="pill2" id="featAll" style="margin-left:6px">全部に戻す</button>` : "今は全部使っています（いちばん当たる組み合わせ）。"}</div>
   </div>`;
 }
-function coefTable(model) {
+function coefTable(model, race) {
   if (!model.coef) return "";
   const rows = model.feature_names.map((nm, i) => `<tr><td style="text-align:left">${nm}</td>${[0, 1, 2].map((j) => {
     const c = model.coef[j][i + 1];
@@ -1487,7 +1497,7 @@ function coefTable(model) {
   return `<div class="tbl"><table class="wt"><thead><tr><th>材料</th><th>1着</th><th>2着</th><th>3着</th></tr></thead><tbody>
     <tr><td style="text-align:left">コース別成績の確率</td>${[0, 1, 2].map((j) => `<td>${model.coef[j][0].toFixed(2)}</td>`).join("")}</tr>${rows}
     ${model.cbias ? [1, 2, 3, 4, 5, 6].map((k) => `<tr><td style="text-align:left">${k}コースの補正</td>${[0, 1, 2].map((j) => {
-      const c = biasFor(model.cbias[j])[k];
+      const c = biasFor(model.cbias[j], race)[k];
       return `<td style="background:rgba(${c < 0 ? "21,101,192" : "232,89,12"},${Math.min(Math.abs(c) / 0.9, 1) * 0.5})">${c > 0 ? "+" : ""}${c.toFixed(2)}</td>`;
     }).join("")}</tr>`).join("") : ""}</tbody></table></div>
     <div class="note">材料の数字は、レース内で平均より1目盛り(標準的なばらつき)上のときの効き。＋は上の着に来やすく、−は来にくい。展示タイムと平均STは小さいほど良いので−が「効いている」向きです。</div>`;

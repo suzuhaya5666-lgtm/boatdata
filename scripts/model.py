@@ -31,6 +31,22 @@ OUT = os.path.join(DATA, "model", "weights.json")
 FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt"]
 FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち"]
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
+KINDS = ["予選", "準優", "優勝戦", "選抜・特選"]  # レースの種別(それ以外は補正なし)
+
+
+def race_kind(name):
+    name = name or ""
+    if "優勝" in name and "準" not in name:
+        return 3
+    if "準優" in name:
+        return 2
+    if "予選" in name:
+        return 1
+    if any(x in name for x in ("選抜", "特選", "特賞", "ドリーム")):
+        return 4
+    return 0
+
+
 VCODES = sorted(VENUES)
 VENUE_IDX = {c: i for i, c in enumerate(VCODES)}
 CLS = {"A1": 4, "A2": 3, "B1": 2, "B2": 1}
@@ -63,7 +79,7 @@ def build():
     by_day = collections.defaultdict(list)
     for r in races:
         by_day[r[0]].append(r)
-    X, N, P, Y, F, H, V, S = [], [], [], [], [], [], [], []
+    X, N, P, Y, F, H, V, S, KD = [], [], [], [], [], [], [], [], []
     for day in sorted(by_day):
         if day >= first + dt.timedelta(days=WARMUP_DAYS):
             for _, code, race, ents in by_day[day]:
@@ -103,6 +119,7 @@ def build():
                 H.append(any(e.get("nat_win") is not None for e in de.values()))  # 出走表(勝率など)があるレースか
                 V.append(VENUE_IDX[code])
                 S.append(grade_cat(grades.get((code, day.isoformat()))) == "sgg1")
+                KD.append(race_kind(race.get("name")))
         for _, code, race, ents in by_day[day]:
             for e in ents:
                 c, p = e["course"], e.get("place")
@@ -127,7 +144,7 @@ def build():
                 if (e.get("st") or "").startswith("F") or (e.get("status") or "").startswith("F"):
                     fcnt[(e["regno"], f_period(day))] += 1
     return (np.array(X), np.array(N), np.array(P), np.array(Y), np.array(F), np.array(H), np.array(V), np.array(S, bool),
-            races[0][0], races[-1][0])
+            np.array(KD), races[0][0], races[-1][0])
 
 
 def fit(X, N, P, Y):
@@ -182,12 +199,14 @@ def base_lq(X, N, P, W):
     return np.log(q / q.sum(1, keepdims=True) + 1e-12)
 
 
-def fit_logit(LQ, Z, Y, V, S, feats, use_cbias, rows=None):
+def fit_logit(LQ, Z, Y, V, S, KD, feats, use_cbias, rows=None):
     """選んだ材料(feats)とコース補正の有無で、着ごとの係数を決める。
     コース補正は 場ごと(場×コース) と SG・G1のとき(全場共通) の2つ。"""
     if rows is not None:
-        LQ, Z, Y, V, S = LQ[rows], Z[rows], Y[rows], V[rows], S[rows]
+        LQ, Z, Y, V, S, KD = LQ[rows], Z[rows], Y[rows], V[rows], S[rows], KD[rows]
     nv = len(VCODES)
+    nk = len(KINDS)
+    Kone = np.eye(nk + 1)[KD][:, 1:]  # (レース, 種別) 0=補正なし
     sg = S.astype(float)[:, None]
     idx = np.arange(len(Y))
     nf = len(feats)
@@ -201,8 +220,9 @@ def fit_logit(LQ, Z, Y, V, S, feats, use_cbias, rows=None):
 
         def biases(t):
             vb = np.concatenate([np.zeros((nv, 1)), t[1 + nf:1 + nf + nv * 6].reshape(nv, 6)], axis=1)
-            sb = np.concatenate([[0], t[1 + nf + nv * 6:]])
-            return vb, sb
+            sb = np.concatenate([[0], t[1 + nf + nv * 6:1 + nf + nv * 6 + 6]])
+            kb = np.concatenate([np.zeros((nk, 1)), t[1 + nf + nv * 6 + 6:].reshape(nk, 6)], axis=1)
+            return vb, sb, kb
 
         onehot = np.zeros((len(Y), 7))
         onehot[idx, Y[:, j]] = 1
@@ -211,8 +231,8 @@ def fit_logit(LQ, Z, Y, V, S, feats, use_cbias, rows=None):
         def loss(t):
             s = t[0] * LQ[:, :, j] + (Zs @ t[1:1 + nf] if nf else 0)
             if use_cbias:  # 場ごとのコース補正 + SG・G1のときのコース補正
-                vb, sb = biases(t)
-                s = s + vb[V] + sg * sb[None, :]
+                vb, sb, kb = biases(t)
+                s = s + vb[V] + sg * sb[None, :] + Kone @ kb
             s = np.where(excl == 1, -1e9, s)
             s = s - s.max(1, keepdims=True)
             lse = np.log(np.exp(s).sum(1))
@@ -225,12 +245,13 @@ def fit_logit(LQ, Z, Y, V, S, feats, use_cbias, rows=None):
             if use_cbias:
                 g.append((Vone.T @ G)[:, 1:].ravel())
                 g.append((sg * G).sum(0)[1:])
+                g.append((Kone.T @ G)[:, 1:].ravel())
                 val += 0.001 * (t[1 + nf:] ** 2).sum()
             grad = np.concatenate([np.atleast_1d(x) for x in g])
             if use_cbias:
                 grad[1 + nf:] += 0.002 * t[1 + nf:]
             return val, grad
-        x0 = np.zeros(1 + nf + ((nv + 1) * 6 if use_cbias else 0))
+        x0 = np.zeros(1 + nf + ((nv + 1 + nk) * 6 if use_cbias else 0))
         x0[0] = 1
         t = minimize(loss, x0, jac=True, method="L-BFGS-B").x
         full = [0.0] * len(FEATURES)
@@ -238,11 +259,12 @@ def fit_logit(LQ, Z, Y, V, S, feats, use_cbias, rows=None):
             full[f] = round(float(t[1 + i]), 4)
         coefs.append([round(float(t[0]), 4)] + full)
         if use_cbias:
-            vb, sb = biases(t)
+            vb, sb, kb = biases(t)
             cbias.append({"venues": {c: np.round(vb[i], 4).tolist() for i, c in enumerate(VCODES)},
-                          "sgg1": np.round(sb, 4).tolist()})
+                          "sgg1": np.round(sb, 4).tolist(),
+                          "kinds": {k: np.round(kb[i], 4).tolist() for i, k in enumerate(KINDS)}})
         else:
-            cbias.append({"venues": {c: [0] * 7 for c in VCODES}, "sgg1": [0] * 7})
+            cbias.append({"venues": {c: [0] * 7 for c in VCODES}, "sgg1": [0] * 7, "kinds": {k: [0] * 7 for k in KINDS}})
     return coefs, cbias
 
 
@@ -250,15 +272,16 @@ PERMS = np.array([(a, b, c) for a in range(1, 7) for b in range(1, 7) for c in r
                   if a != b and b != c and a != c])
 
 
-def evaluate(LQ, Z, Y, V, S, coefs, cbias, rows):
+def evaluate(LQ, Z, Y, V, S, KD, coefs, cbias, rows):
     """検証用: 指定したレースで、3連単上位10点・2連単上位3点・単勝の的中率。"""
-    LQ, Z, Y, V, S = LQ[rows], Z[rows], Y[rows], V[rows], S[rows]
+    LQ, Z, Y, V, S, KD = LQ[rows], Z[rows], Y[rows], V[rows], S[rows], KD[rows]
     n = len(Y)
     ex = []
     for j in range(3):
         c = np.array(coefs[j])
         vb = np.array([cbias[j]["venues"][cc] for cc in VCODES])
-        s = c[0] * LQ[:, :, j] + Z @ c[1:] + vb[V] + S.astype(float)[:, None] * np.array(cbias[j]["sgg1"])[None, :]
+        kb = np.array([[0] * 7] + [cbias[j]["kinds"][k] for k in KINDS])
+        s = c[0] * LQ[:, :, j] + Z @ c[1:] + vb[V] + S.astype(float)[:, None] * np.array(cbias[j]["sgg1"])[None, :] + kb[KD]
         s[:, 0] = -1e9
         ex.append(np.exp(s - s.max(1, keepdims=True)))
     s1, s2, s3 = ex
@@ -291,7 +314,7 @@ def main():
             if json.load(f).get("month") == f"{today:%Y-%m}":
                 print("今月の重みは作成済み")
                 return
-    X, N, P, Y, F, H, V, S, first, last = build()
+    X, N, P, Y, F, H, V, S, KD, first, last = build()
     W, losses = fit(X, N, P, Y)  # コース別成績の重みは全期間で
     prog = np.where(H)[0]        # 材料の係数は、出走表があるレースだけで決める
     Zp, sd = standardize(F[prog])
@@ -308,9 +331,9 @@ def main():
     for mask in range(1 << (nfeat + 1)):
         feats = [i for i in range(nfeat) if mask >> i & 1]
         use_cb = bool(mask >> nfeat & 1)
-        c_tr, b_tr = fit_logit(LQ_tr, Z, Y, V, S, feats, use_cb, rows=tr)
-        ev = evaluate(LQ_tr, Z, Y, V, S, c_tr, b_tr, te)
-        c_all, b_all = fit_logit(LQ, Z, Y, V, S, feats, use_cb, rows=prog)
+        c_tr, b_tr = fit_logit(LQ_tr, Z, Y, V, S, KD, feats, use_cb, rows=tr)
+        ev = evaluate(LQ_tr, Z, Y, V, S, KD, c_tr, b_tr, te)
+        c_all, b_all = fit_logit(LQ, Z, Y, V, S, KD, feats, use_cb, rows=prog)
         combos[str(mask)] = {"coef": c_all, "cbias": b_all, "eval": ev}
         print(f"組み合わせ {mask:3d}: {ev}")
     full = combos[str((1 << (nfeat + 1)) - 1)]
