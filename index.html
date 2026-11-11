@@ -1503,7 +1503,20 @@ async function drawDemeTab(v, race) {
   const list = (items, n, fmtKey) => items.slice(0, n).map((t, i) => `
     <tr class="${t.hit ? "hit" : ""}"><td>${i + 1}</td><td class="combo">${fmtKey(t)}</td>
       <td>${(t.p * 100).toFixed(1)}%</td><td>${(1 / t.p).toFixed(1)}倍</td></tr>`).join("");
-  const triRows = list(triB.map((t) => ({ ...t, hit: isHit(t.b) })), 20, (t) => t.b.map(bb).join("-"));
+  // 3連単のランキング: 総合 / 逃げ(1コースの艇が1着) / 逃げ以外。下の方も見られるように点数を増やせる
+  const mode = state.triMode || "all";
+  const b1 = boatOf(1);
+  const nigeP = triB.filter((t) => t.b[0] === b1).reduce((a, t) => a + t.p, 0);
+  const triSel = triB.filter((t) => mode === "all" ? true : mode === "nige" ? t.b[0] === b1 : t.b[0] !== b1);
+  const triN = Math.min(state.triN || 20, triSel.length);
+  const selP = triSel.reduce((a, t) => a + t.p, 0);
+  const triRows = triSel.slice(0, triN).map((t, i) => `
+    <tr class="${isHit(t.b) ? "hit" : ""}"><td>${i + 1}</td><td class="combo">${t.b.map(bb).join("-")}</td>
+      <td>${(t.p * 100).toFixed(2)}%</td>${mode === "all" ? "" : `<td>${selP ? (t.p / selP * 100).toFixed(1) : "-"}%</td>`}<td>${(1 / t.p).toFixed(1)}倍</td></tr>`).join("");
+  const selRank = res ? triSel.findIndex((t) => isHit(t.b)) : -1;
+  const more = (key, n, total, step) => n < total
+    ? `<div class="slots" style="margin-top:8px"><button class="pill2" data-more="${key}" data-n="${Math.min(n + step, total)}">もっと見る（あと${Math.min(step, total - n)}点）</button><button class="pill2" data-more="${key}" data-n="${total}">全部（${total}点）</button></div>`
+    : (n > (key === "tri" ? 20 : key === "exa" || key === "trio" ? 10 : 6) ? `<div class="slots" style="margin-top:8px"><button class="pill2" data-more="${key}" data-n="0">上位だけに戻す</button></div>` : "");
   const exa = sumBy(triB.map((t) => ({ c: t.b, p: t.p })), (c) => `${c[0]}-${c[1]}`)
     .map((x) => ({ ...x, hit: res && x.k === `${res[0]}-${res[1]}` }));
   const trio = sumBy(triB.map((t) => ({ c: t.b, p: t.p })), (c) => [...c].sort().join("="))
@@ -1544,21 +1557,24 @@ async function drawDemeTab(v, race) {
         <tbody>${rows}</tbody></table></div>
     </div>
     <div class="card">
-      <h2>3連単 上位20点</h2>
-      ${res ? `<div class="meta"><span>${hitRank >= 0 ? `結果 ${res.map(bb).join("-")} は ${hitRank + 1}番目（${(triB[hitRank].p * 100).toFixed(1)}%）` : `結果 ${res.map(bb).join("-")} には切った艇が入っています`}</span></div>` : ""}
-      <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
+      <h2>3連単ランキング</h2>
+      <div class="pills">${[["all", "総合"], ["nige", "逃げ"], ["other", "逃げ以外"]].map(([k, l]) => `<button class="pill2 ${mode === k ? "on" : ""}" data-trimode="${k}">${l}</button>`).join("")}</div>
+      <div class="meta"><span>逃げ（${bb(b1)}が1着）の確率 ${(nigeP * 100).toFixed(1)}%</span>${vs.venues[state.venue]?.all?.course?.[1] ? `<span>場の平均 ${(vs.venues[state.venue].all.course[1].p1 / vs.venues[state.venue].all.course[1].n * 100).toFixed(1)}%</span>` : ""}</div>
+      ${res ? `<div class="meta"><span>${selRank >= 0 ? `結果 ${res.map(bb).join("-")} は${mode === "all" ? "" : mode === "nige" ? "逃げの中で" : "逃げ以外の中で"} ${selRank + 1}番目（${(triSel[selRank].p * 100).toFixed(2)}%）` : hitRank >= 0 ? `結果 ${res.map(bb).join("-")} は${mode === "nige" ? "逃げ以外" : "逃げ"}の買い目（総合 ${hitRank + 1}番目）` : `結果 ${res.map(bb).join("-")} には切った艇が入っています`}</span></div>` : ""}
+      <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th>${mode === "all" ? "" : `<th>${mode === "nige" ? "逃げ" : "逃げ以外"}の中で</th>`}<th>目安オッズ</th></tr></thead>
         <tbody>${triRows}</tbody></table></div>
-      <div class="note">目安オッズは 1÷確率。実際のオッズがこれより高ければ、確率の上では割に合う買い目です。上位20点の合計 ${(triB.slice(0, 20).reduce((a, t) => a + t.p, 0) * 100).toFixed(1)}%。</div>
+      ${more("tri", triN, triSel.length, 20)}
+      <div class="note">目安オッズは 1÷確率。実際のオッズがこれより高ければ、確率の上では割に合う買い目です。表示した${triN}点の合計 ${(triSel.slice(0, triN).reduce((a, t) => a + t.p, 0) * 100).toFixed(1)}%。${mode === "all" ? "" : `「${mode === "nige" ? "逃げ" : "逃げ以外"}の中で」は、${mode === "nige" ? "逃げた" : "逃げなかった"}としたときの割合です。`}</div>
     </div>
-    <div class="card"><h2>2連単 上位10点</h2>
+    <div class="card"><h2>2連単</h2>
       <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
-        <tbody>${list(exa, 10, keyFmt("-"))}</tbody></table></div></div>
-    <div class="card"><h2>3連複 上位10点</h2>
+        <tbody>${list(exa, state.exaN || 10, keyFmt("-"))}</tbody></table></div>${more("exa", Math.min(state.exaN || 10, exa.length), exa.length, 10)}</div>
+    <div class="card"><h2>3連複</h2>
       <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
-        <tbody>${list(trio, 10, keyFmt("="))}</tbody></table></div></div>
-    <div class="card"><h2>2連複 上位6点</h2>
+        <tbody>${list(trio, state.trioN || 10, keyFmt("="))}</tbody></table></div>${more("trio", Math.min(state.trioN || 10, trio.length), trio.length, 10)}</div>
+    <div class="card"><h2>2連複</h2>
       <div class="tbl"><table class="cmp"><thead><tr><th>順</th><th>買い目</th><th>確率</th><th>目安オッズ</th></tr></thead>
-        <tbody>${list(quin, 6, keyFmt("="))}</tbody></table></div></div>
+        <tbody>${list(quin, state.quinN || 6, keyFmt("="))}</tbody></table></div>${more("quin", Math.min(state.quinN || 6, quin.length), quin.length, 9)}</div>
     <div class="card"><h2>計算のしかた</h2>
       <div class="note" style="font-size:13px;line-height:1.7">
         各艇の1〜3着確率は、<b>自艇の成績</b>（その選手がそのコースで走ったときの着率）と、<b>他艇から見た成績</b>（ほかの選手のレースで、そのコースの艇が何着だったか）を、着ごと・コースごとに決めた重みで混ぜています。
@@ -1600,6 +1616,15 @@ async function drawDemeTab(v, race) {
     if (cut.has(n)) cut.delete(n); else if (cut.size < 3) cut.add(n);
     if (cut.size) state.cuts[key] = [...cut]; else delete state.cuts[key];
     drawDemeTab(v, race);
+  });
+  $("view-race").querySelectorAll("[data-trimode]").forEach((b) => b.onclick = () => {
+    state.triMode = b.dataset.trimode; state.triN = 20; drawDemeTab(v, race);
+  });
+  $("view-race").querySelectorAll("[data-more]").forEach((b) => b.onclick = () => {
+    const n = Number(b.dataset.n), k = b.dataset.more;
+    const key = { tri: "triN", exa: "exaN", trio: "trioN", quin: "quinN" }[k];
+    state[key] = n || undefined;
+    const y = window.scrollY; drawDemeTab(v, race); window.scrollTo(0, y);
   });
   $("view-race").querySelectorAll("[data-head]").forEach((b) => b.onclick = () => {
     const n = Number(b.dataset.head);
