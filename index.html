@@ -78,6 +78,8 @@
   .race .dead b { font-size: 20px; color: var(--ink); margin-left: 4px; }
   .race .badge { margin-left: auto; background: var(--accent); color: #fff; font-weight: 700; font-size: 14px; padding: 6px 10px; border-radius: 6px; }
   .race .badge.wait { background: #e9ecef; color: var(--sub); }
+  .hare { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
+  .harerest { font-size: 12px; color: #c92a2a; font-weight: 700; }
   .arebadge { font-size: 13px; font-weight: 700; padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
   .arebadge.l3 { background: #c92a2a; color: #fff; } .arebadge.l2 { background: #f76707; color: #fff; }
   .arebadge.l1 { background: #fff3bf; color: #8a5a00; } .arebadge.l0 { background: #e7f5ff; color: #1864ab; }
@@ -405,6 +407,7 @@ function drawHome() {
       <div class="vn">${esc(name)}</div>
       <div class="dl">${dayText(v)}${NIGHT.includes(code) ? '<span class="night">🌙</span>' : ""}</div>
       <div class="st ${s.done ? "done" : ""}">${s.text}</div>
+      <div class="hare" data-hare="${code}"></div>
       <div class="tt">${esc(v.title || "")}</div>
     </button>`;
   }).join("");
@@ -412,6 +415,33 @@ function drawHome() {
     <div class="updated">データ更新 ${esc(state.index.updated)}</div>`;
   $("view-race").querySelectorAll("[data-v]").forEach((b) =>
     b.addEventListener("click", () => go("list", { venue: b.dataset.v })));
+  fillHomeAre();
+}
+
+// 場選択: 次のレース(締切前)が荒れ注意以上なら印。その日のあとの荒れレースも
+async function fillHomeAre() {
+  const date = state.date, now = nowJST();
+  if (date < now.date) return;
+  for (const code of Object.keys(ARE)) {
+    const v = state.day?.venues?.[code];
+    if (!v) continue;
+    const races = Object.values(v.races).sort((a, b) => a.no - b.no)
+      .filter((r) => !r.payouts && (date > now.date || (r.deadline && r.deadline > now.time)));
+    if (!races.length) continue;
+    const hits = [];
+    let nextA = null;
+    for (const [i, r] of races.entries()) {
+      let a = null;
+      try { a = areOf((await computeDeme({ ...r, _v: code }))?.prob, code); } catch (e) { a = null; }
+      if (state.screen !== "home" || state.date !== date) return;
+      if (i === 0) nextA = a;
+      if (i > 0 && a && a.lvl >= 2) hits.push(r.no);
+    }
+    const el = document.querySelector(`[data-hare="${code}"]`);
+    if (!el) continue;
+    const nx = nextA && nextA.lvl >= 2 ? `<span class="arebadge l${nextA.lvl}">${nextA.icon} 次${races[0].no}R</span>` : "";
+    el.innerHTML = nx + (hits.length ? `<span class="harerest">🔥 ${hits.map((n) => n + "R").join("・")}</span>` : "");
+  }
 }
 
 // ---------------------------------------------------------------- 出走表一覧
@@ -463,6 +493,34 @@ const ARE = {
     { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 13.1, med: 1790, nige: 65 },
     { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 6.0, med: 1140, nige: 74 },
   ],
+  "08": [
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 26.3, med: 5370, nige: 31 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 21.6, med: 3760, nige: 40 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 15.7, med: 2740, nige: 54 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 11.8, med: 1680, nige: 70 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 5.9, med: 990, nige: 80 },
+  ],
+  "11": [
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 21.2, med: 5020, nige: 33 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 19.5, med: 3520, nige: 41 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 17.0, med: 2610, nige: 50 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 13.7, med: 1800, nige: 64 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 12.6, med: 1150, nige: 69 },
+  ],
+  "12": [
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 20.0, med: 4625, nige: 32 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 20.8, med: 3580, nige: 41 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 15.7, med: 2480, nige: 54 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 14.5, med: 1870, nige: 67 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 9.9, med: 1160, nige: 74 },
+  ],
+  "19": [
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 27.8, med: 5730, nige: 38 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 22.1, med: 3630, nige: 45 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 16.2, med: 2640, nige: 56 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 12.9, med: 1670, nige: 69 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 8.4, med: 1025, nige: 80 },
+  ],
 };
 function areOf(prob, venue) {
   const tbl = ARE[venue];
@@ -492,7 +550,7 @@ function areCard(prob, venue, vname) {
     <div class="tbl"><table class="cmp"><thead><tr><th>判定</th><th>上位10点の合計</th><th>万舟率</th><th>3連単<br>中央値</th><th>イン逃げ</th></tr></thead><tbody>
     ${tbl.map((t, i) => `<tr class="${t === tbl.find((x) => x.lvl === a.lvl) ? "hit" : ""}"><td>${t.icon} ${t.label}</td><td>${i ? (tbl[i - 1].lt * 100).toFixed(0) : 0}〜${t.lt < 2 ? (t.lt * 100).toFixed(0) + "%" : ""}</td><td>${t.man.toFixed(1)}%</td><td>${t.med.toLocaleString()}円</td><td>${t.nige}%</td></tr>`).join("")}
     </tbody></table></div>
-    <div class="note">出目確率が上位10点に集まっていないほど、展開が読みにくいレース。${esc(vname)}の過去約5,000レース（2024/1〜）で、段ごとに実際に万舟（3連単1万円以上）になった割合です（場全体は約14%）。「荒れやすい」の目安で、荒れ注意でも万舟は5レースに1回ほど。</div></div>`;
+    <div class="note">出目確率が上位10点に集まっていないほど、展開が読みにくいレース。${esc(vname)}の過去約5,000レース（2024/1〜、枠なり）で、段ごとに実際に万舟（3連単1万円以上）になった割合です（場全体は約14%）。「荒れやすい」の目安で、荒れ注意でも万舟は5レースに1回ほど。</div></div>`;
 }
 
 // ---------------------------------------------------------------- レース詳細
@@ -1352,7 +1410,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     const e = ents[b] || {};
     if (ORGK.includes(f)) {  // オリジナル展示: 場・コースの平均を引いて、速いほど大きく
       const x = bi?.org?.[b]?.[f];
-      const cm = model.org_cm?.[state.venue]?.[ORGK.indexOf(f)];
+      const cm = model.org_cm?.[race?._v || state.venue]?.[ORGK.indexOf(f)];
       return x != null && cm ? -(x - cm[k]) : null;
     }
     if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
@@ -1450,8 +1508,9 @@ function raceKind(name) {
 function biasFor(cb, race) {
   if (!cb) return [0, 0, 0, 0, 0, 0, 0];
   if (Array.isArray(cb)) return cb;
-  const vb = cb.venues?.[state.venue] || [0, 0, 0, 0, 0, 0, 0];
-  const g = state.day?.venues?.[state.venue]?.grade;
+  const vc = race?._v || state.venue;
+  const vb = cb.venues?.[vc] || [0, 0, 0, 0, 0, 0, 0];
+  const g = state.day?.venues?.[vc]?.grade;
   const sg = g === "SG" || g === "G1";
   const kd = race ? cb.kinds?.[raceKind(race.name)] : null;
   return vb.map((x, k) => x + (sg ? cb.sgg1?.[k] || 0 : 0) + (kd ? kd[k] || 0 : 0));
@@ -1475,18 +1534,19 @@ function sumBy(tri, keyFn) {
 
 // 出目確率タブと同じ設定(進入・材料)で、艇番ベースの確率を出す
 async function computeDeme(race) {
+  const vc = race._v || state.venue;
   const hd = state.date.replace(/-/g, "");
   const [model, vs, bi, ...files] = await Promise.all([
     cached("data/model/weights.json"), cached("data/stats/venues.json"),
-    getBefore(hd, state.venue, race.no),
+    getBefore(hd, vc, race.no),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
   if (!model || !vs) return null;
   const racers = Object.fromEntries(race.entries.map((e, i) => [e.boat, files[i]]));
   const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
   let base = [0, 1, 2, 3, 4, 5, 6];
   if (bi?.start?.length === 6) base = [0, ...bi.start.map((s) => s.boat)];
-  const order = state.orders?.[`${state.date}_${state.venue}_${race.no}`] || base;
-  const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model, race);
+  const order = state.orders?.[`${state.date}_${vc}_${race.no}`] || base;
+  const adj = demeAdjust(demeQ(order, racers, vs.venues[vc].all, model), order, ents, racers, bi, model, race);
   const tri = demeTri(adj.q).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
   const prob = {};  // 券種 -> {組番: 確率}
   const add = (bet, k, p) => { (prob[bet] = prob[bet] || {})[k] = (prob[bet][k] || 0) + p; };
