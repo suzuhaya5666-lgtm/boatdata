@@ -141,6 +141,12 @@
   .slot.cutbtn.on .mini { opacity: .35; }
   .slot.cutbtn.on small { color: #e03131; font-weight: 800; }
   tr.cutrow td { color: #adb5bd; }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+  td.hz60 { background: #ffc9c9; font-weight: 800; }
+  td.hz55 { background: #ffe3e3; }
+  td.hz45 { background: #e7f5ff; color: #1971c2; }
+  table.hz td { font-size: 11px; line-height: 1.3; }
+  td.hzmark { background: #fff9db; outline: 2px solid #fab005; }
   .slot.headbtn.on small { color: #e03131; font-weight: 800; }
   .slot .mini { width: 30px; height: 30px; line-height: 30px; font-size: 16px; }
   table.wt { font-size: 12px; margin-top: 4px; }
@@ -1122,7 +1128,7 @@ const WIND = ["", "北", "北北東", "北東", "東北東", "東", "東南東",
 async function drawExhTab(v, race) {
   loading();
   const hd = state.date.replace(/-/g, "");
-  const bi = await getBefore(hd, state.venue, race.no);
+  const [bi, hensa] = await Promise.all([getBefore(hd, state.venue, race.no), cached("data/model/hensa.json")]);
   if (state.dtab !== "exh") return;
   const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
   const hasResult = race.entries.some((e) => e.course);
@@ -1152,6 +1158,20 @@ async function drawExhTab(v, race) {
     const x = org[b]?.[k];
     return `<td class="${orgCls[k](x)}">${x != null ? x.toFixed(2) : "-"}</td>`;
   }).join("") : "";
+  // レース内偏差値(コースの平均を引いてから、6艇の中で比べる。速いほど高い)
+  const hz = hensa?.[state.venue];
+  const courseOf = (b) => order ? (order.find((o) => o.boat === b)?.course ?? b) : b;
+  let hv = null;
+  if (hz && org && [1, 2, 3, 4, 5, 6].every((b) => org[b] && hz.keys.every((k) => org[b][k] != null))) {
+    const dev = [1, 2, 3, 4, 5, 6].map((b) => hz.keys.map((k, i) => org[b][k] - hz.cm[courseOf(b) - 1][i]));
+    const mean = hz.keys.map((_, i) => dev.reduce((a, d) => a + d[i], 0) / 6);
+    const T = dev.map((d) => d.map((x, i) => 50 - 10 * (x - mean[i]) / hz.sd[i]));
+    const tm = T.map((t) => t.reduce((a, b) => a + b, 0) / t.length);
+    const mm = tm.reduce((a, b) => a + b, 0) / 6;
+    hv = {};
+    [1, 2, 3, 4, 5, 6].forEach((b, i) => { hv[b] = { sum: 50 + 10 * (tm[i] - mm) / hz.sd_sum, each: T[i] }; });
+  }
+  const hcls = (x) => x == null ? "" : x >= 60 ? "hz60" : x >= 55 ? "hz55" : x < 45 ? "hz45" : "";
   const rows = (order || [1, 2, 3, 4, 5, 6].map((b) => ({ course: b, boat: b }))).map((o) => {
     const e = ents[o.boat] || { boat: o.boat };
     const b = bi?.entries?.[o.boat] || {};
@@ -1161,6 +1181,7 @@ async function drawExhTab(v, race) {
       <td class="${moved ? "moved" : ""}">${order ? o.course : "-"}</td>${lane(e)}
       <td class="${rcls(x)}">${x != null ? x.toFixed(2) : "-"}${x != null && x !== best ? `<br><small class="cnt">+${(x - best).toFixed(2)}</small>` : ""}</td>
       ${orgTd(o.boat)}
+      ${hv ? `<td class="${hcls(hv[o.boat].sum)}">${hv[o.boat].sum.toFixed(1)}</td>` : ""}
       <td>${o.st ? esc(o.st) : "-"}</td>
       <td>${b.tilt != null ? b.tilt.toFixed(1) : "-"}</td>
       <td>${b.propeller ? `<span class="new">${esc(b.propeller)}</span>` : "-"}</td>
@@ -1179,11 +1200,41 @@ async function drawExhTab(v, race) {
     <div class="card">
       <h2>展示情報</h2>
       ${wline}
-      <div class="tbl"><table class="cmp exh"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>展示<br>タイム</th>${org ? OK.map(([, l]) => `<th>${l}</th>`).join("") : ""}
+      <div class="tbl"><table class="cmp exh"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>展示<br>タイム</th>${org ? OK.map(([, l]) => `<th>${l}</th>`).join("") : ""}${hv ? "<th>合計<br>偏差値</th>" : ""}
         <th>${order === bi?.start ? "展示ST" : "ST"}</th><th>チルト</th><th>プロペラ</th><th>部品交換</th><th>体重</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
-      <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${org ? "一周・まわり足・直線は場独自の計測（オリジナル展示）で、どれも小さいほど良く、1番を赤、2番を黄。" : ""}${status}</div>
-    </div>`;
+      <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${org ? "一周・まわり足・直線は場独自の計測（オリジナル展示）で、どれも小さいほど良く、1番を赤、2番を黄。" : ""}${hv ? "合計偏差値は、展示タイムとオリジナル展示3つをコースの平均との差にしてから、このレースの6艇の中で比べたもの（50が平均、速いほど高い）。60以上は濃い赤、55以上は赤、45未満は青。" : ""}${status}</div>
+    </div>${hz ? hensaCard(hz, hv, courseOf) : ""}`;
+  $("view-race").querySelectorAll("[data-hkey]").forEach((b) => b.onclick = () => { state.hensaKey = b.dataset.hkey; drawExhTab(v, race); });
+}
+
+// 偏差値ごとの着率表(3年分)。このレースの各艇が入る段に印をつける
+function hensaCard(hz, hv, courseOf) {
+  const key = state.hensaKey || "sum";
+  const names = { sum: "合計", ...Object.fromEntries(hz.keys.map((k, i) => [k, hz.names[i]])) };
+  const tab = hz.tables[key];
+  const binOf = (x) => hz.bins.filter((b) => x >= b).length;
+  const mark = {};
+  if (hv) [1, 2, 3, 4, 5, 6].forEach((b) => {
+    const x = key === "sum" ? hv[b].sum : hv[b].each[hz.keys.indexOf(key)];
+    mark[`${binOf(x)}_${courseOf(b)}`] = b;
+  });
+  const cell = (c, a) => {
+    if (!c || !c.n) return "<td>-</td>";
+    const d = c.r3 - a.r3;
+    const cls = d >= 0.05 ? "color:#e03131" : d <= -0.05 ? "color:#1971c2" : "";
+    return `<td style="${cls}">${(c.r1 * 100).toFixed(1)}<br>${(c.r2 * 100).toFixed(1)}<br><b>${(c.r3 * 100).toFixed(1)}</b></td>`;
+  };
+  return `<div class="card"><h2>偏差値ごとの着率（${esc(names[key])}）</h2>
+    <div class="pills">${Object.entries(names).map(([k, n]) => `<button class="pill2 ${k === key ? "on" : ""}" data-hkey="${k}">${esc(n)}</button>`).join("")}</div>
+    <div class="tbl"><table class="cmp hz"><thead><tr><th>偏差値</th>${[1, 2, 3, 4, 5, 6].map((c) => `<th>${c}コース</th>`).join("")}</tr></thead><tbody>
+      ${tab.map((row, bi) => `<tr><td>${hz.labels[bi]}</td>${row.map((c, ci) => {
+        const b = mark[`${bi}_${ci + 1}`];
+        return cell(c, hz.avg[ci]).replace("<td", b ? `<td class="hzmark"` : "<td").replace(/^(<td[^>]*>)/, b ? `$1<span class="mini w${b}" style="display:inline-block;width:16px;height:16px;line-height:16px;font-size:11px;border-radius:3px">${b}</span><br>` : "$1");
+      }).join("")}</tr>`).join("")}
+      <tr><td>平均</td>${hz.avg.map((a) => `<td>${(a.r1 * 100).toFixed(1)}<br>${(a.r2 * 100).toFixed(1)}<br><b>${(a.r3 * 100).toFixed(1)}</b></td>`).join("")}</tr>
+    </tbody></table></div>
+    <div class="note">上から1着率・2連対率・<b>3連対率</b>（%）。蒲郡の3年分（${hz.races.toLocaleString()}レース、前付けなし）。3連対率がコース平均より5ポイント以上高い段は赤、低い段は青。${hv ? "枠番の印は、このレースの各艇が入る段です。" : "展示が出ると、このレースの各艇が入る段に印がつきます。"}</div></div>`;
 }
 
 // ---------------------------------------------------------------- 出目確率
