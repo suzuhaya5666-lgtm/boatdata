@@ -1145,8 +1145,9 @@ async function drawRacerTab(v, race) {
 
 // ---------------------------------------------------------------- 展示情報
 const WIND = ["", "北", "北北東", "北東", "東北東", "東", "東南東", "南東", "南南東", "南", "南南西", "南西", "西南西", "西", "西北西", "北西", "北北西"];
-async function drawExhTab(v, race) {
-  loading();
+async function drawExhTab(v, race, keepPos) {
+  const keepY = keepPos ? window.scrollY : null;
+  if (!keepPos) loading();
   const hd = state.date.replace(/-/g, "");
   const [bi, hensa] = await Promise.all([getBefore(hd, state.venue, race.no), cached("data/model/hensa.json")]);
   if (state.dtab !== "exh") return;
@@ -1225,7 +1226,8 @@ async function drawExhTab(v, race) {
         <tbody>${rows}</tbody></table></div>
       <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${org ? "一周・まわり足・直線は場独自の計測（オリジナル展示）で、どれも小さいほど良く、1番を赤、2番を黄。" : ""}${hv ? "合計偏差値は、展示タイムとオリジナル展示3つをコースの平均との差にしてから、このレースの6艇の中で比べたもの（50が平均、速いほど高い）。60以上は濃い赤、55以上は赤、45未満は青。" : ""}${status}</div>
     </div>${hz ? hensaCard(hz, hv, courseOf) : ""}`;
-  $("view-race").querySelectorAll("[data-hkey]").forEach((b) => b.onclick = () => { state.hensaKey = b.dataset.hkey; drawExhTab(v, race); });
+  if (keepY != null) window.scrollTo(0, keepY);
+  $("view-race").querySelectorAll("[data-hkey]").forEach((b) => b.onclick = () => { state.hensaKey = b.dataset.hkey; drawExhTab(v, race, true); });
 }
 
 // 偏差値ごとの着率表(3年分)。このレースの各艇が入る段に印をつける
@@ -1460,8 +1462,10 @@ async function computeDeme(race) {
   return { prob, rank, exh: !!bi?.start?.length };
 }
 
-async function drawDemeTab(v, race) {
-  loading();
+async function drawDemeTab(v, race, keepPos) {
+  // keepPos: 同じレースの描き直し(切り替えボタンなど)。画面の位置をそのままにする
+  const keepY = keepPos ? window.scrollY : null;
+  if (!keepPos) loading();
   const hd = state.date.replace(/-/g, "");
   const [model, vs, bi, ...files] = await Promise.all([
     cached("data/model/weights.json"), cached("data/stats/venues.json"),
@@ -1607,6 +1611,7 @@ async function drawDemeTab(v, race) {
       ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? ((1 << (featGroups(model).length + 1)) - 1)] || {}) }, race)}
       <div class="tbl">${weightTable(model)}</div>
     </div>`;
+  if (keepY != null) window.scrollTo(0, keepY);
 
   $("view-race").querySelectorAll("[data-slot]").forEach((b) => b.onclick = () => {
     const c = Number(b.dataset.slot);
@@ -1620,42 +1625,42 @@ async function drawDemeTab(v, race) {
       }
       state.pick = null;
     }
-    drawDemeTab(v, race);
+    drawDemeTab(v, race, true);
   });
   document.querySelectorAll("#feats [data-f]").forEach((b) => b.onclick = () => {
     const ng = featGroups(model).length;
     const cur = state.featMask ?? ((1 << (ng + 1)) - 1);
     state.featMask = cur ^ (1 << Number(b.dataset.f));
-    drawDemeTab(v, race);
+    drawDemeTab(v, race, true);
   });
   const fa = $("featAll");
-  if (fa) fa.onclick = () => { state.featMask = null; drawDemeTab(v, race); };
+  if (fa) fa.onclick = () => { state.featMask = null; drawDemeTab(v, race, true); };
   $("view-race").querySelectorAll("[data-cut]").forEach((b) => b.onclick = () => {
     const n = Number(b.dataset.cut);
     if (n === head) return;
     if (cut.has(n)) cut.delete(n); else if (cut.size < 3) cut.add(n);
     if (cut.size) state.cuts[key] = [...cut]; else delete state.cuts[key];
-    drawDemeTab(v, race);
+    drawDemeTab(v, race, true);
   });
   $("view-race").querySelectorAll("[data-trimode]").forEach((b) => b.onclick = () => {
-    state.triMode = b.dataset.trimode; state.triN = 20; drawDemeTab(v, race);
+    state.triMode = b.dataset.trimode; state.triN = 20; drawDemeTab(v, race, true);
   });
   $("view-race").querySelectorAll("[data-more]").forEach((b) => b.onclick = () => {
     const n = Number(b.dataset.n), k = b.dataset.more;
     const key = { tri: "triN", exa: "exaN", trio: "trioN", quin: "quinN" }[k];
     state[key] = n || undefined;
-    const y = window.scrollY; drawDemeTab(v, race); window.scrollTo(0, y);
+    drawDemeTab(v, race, true);
   });
   $("view-race").querySelectorAll("[data-head]").forEach((b) => b.onclick = () => {
     const n = Number(b.dataset.head);
     if (head === n) delete state.heads[key];
     else { state.heads[key] = n; if (state.cuts[key]) { state.cuts[key] = state.cuts[key].filter((x) => x !== n); if (!state.cuts[key].length) delete state.cuts[key]; } }
-    drawDemeTab(v, race);
+    drawDemeTab(v, race, true);
   });
   const rc = $("resetCut");
-  if (rc) rc.onclick = () => { delete state.cuts[key]; delete state.heads[key]; drawDemeTab(v, race); };
+  if (rc) rc.onclick = () => { delete state.cuts[key]; delete state.heads[key]; drawDemeTab(v, race, true); };
   const rb = $("resetOrder");
-  if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race); };
+  if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race, true); };
 }
 
 function featCard(model, adj) {
@@ -1871,11 +1876,13 @@ async function renderVenue() {
       <h3 class="oh">${esc(vv.name)}</h3>${st34Table(vs.st34.venues[code])}
       <h3 class="oh">全国（江戸川を除く23場）</h3>${st34Table(vs.st34.overall)}</div>` : ""}
     <div id="vextra"></div>`;
-  venueExtra(code, vv.name).then((h) => {
+  // 場専用データ(偏差値の切り替えはこの部分だけ描き直すので、画面の位置は動かない)
+  const drawExtra = () => venueExtra(code, vv.name).then((h) => {
     const el = $("vextra"); if (!el) return;
     el.innerHTML = h;
-    el.querySelectorAll("[data-hkey]").forEach((b) => b.onclick = () => { state.hensaKey = b.dataset.hkey; renderVenue(); });
+    el.querySelectorAll("[data-hkey]").forEach((b) => b.onclick = () => { state.hensaKey = b.dataset.hkey; drawExtra(); });
   });
+  drawExtra();
   $("vg").querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; renderVenue(); });
   box.querySelectorAll("[data-sv]").forEach((b) => b.addEventListener("click", () => {
     state.venue = b.dataset.sv; store.set("venue", state.venue); renderVenue();
