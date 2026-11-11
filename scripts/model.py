@@ -22,13 +22,17 @@ from scipy.optimize import minimize
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect import DATA, JST, VENUES  # noqa: E402
-from stats import load_races, started  # noqa: E402
+from stats import f_period, grade_cat, load_races, started  # noqa: E402
+from collect import load_grades  # noqa: E402
 
 M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走分)
 WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
-FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st"]
-FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST"]
+FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt"]
+FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち"]
+FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
+VCODES = sorted(VENUES)
+VENUE_IDX = {c: i for i, c in enumerate(VCODES)}
 CLS = {"A1": 4, "A2": 3, "B1": 2, "B2": 1}
 _days = {}
 
@@ -52,16 +56,21 @@ def build():
     selfc = collections.defaultdict(lambda: np.zeros((7, 4)))
     othc = collections.defaultdict(lambda: np.zeros((7, 7, 4)))
     venue = collections.defaultdict(lambda: np.zeros((7, 4)))
-    stsum = collections.defaultdict(lambda: np.zeros(2))
+    stN = collections.defaultdict(lambda: np.zeros(2))  # F持ちでないときのST
+    stF = collections.defaultdict(lambda: np.zeros(2))  # F持ちのときのST
+    fcnt = collections.Counter()                        # (選手, 期) -> F数
+    grades = load_grades()
     by_day = collections.defaultdict(list)
     for r in races:
         by_day[r[0]].append(r)
-    X, N, P, Y, F, H = [], [], [], [], [], []
+    X, N, P, Y, F, H, V, S = [], [], [], [], [], [], [], []
     for day in sorted(by_day):
         if day >= first + dt.timedelta(days=WARMUP_DAYS):
             for _, code, race, ents in by_day[day]:
                 courses = {e["course"]: e for e in ents}
                 if code not in VENUES or sorted(courses) != [1, 2, 3, 4, 5, 6]:
+                    continue
+                if any(e["course"] != e["boat"] for e in ents):  # 前付けなど枠なりでないレースは学習に使わない
                     continue
                 pl = {e.get("place"): e["course"] for e in ents}
                 if not all(p in pl for p in (1, 2, 3)):
@@ -83,18 +92,23 @@ def build():
                 for k in range(1, 7):
                     e = courses[k]
                     b = de.get(e["boat"], {})
-                    st = stsum[e["regno"]]
+                    fc = fcnt[(e["regno"], f_period(day))]
+                    n_, f_ = stN[e["regno"]], stF[e["regno"]]
+                    normal = n_[0] / n_[1] if n_[1] else np.nan
+                    adj = normal if fc == 0 else (f_[0] / f_[1] if f_[1] >= 5 else normal + FDELTA[min(fc, 2)])
                     f[k] = [e.get("exh") or np.nan, b.get("nat_win") or np.nan, b.get("loc_win") or np.nan,
                             b["motor_2"] if b.get("motor_2") is not None else np.nan,
-                            CLS.get(b.get("class"), np.nan), st[0] / st[1] if st[1] else np.nan]
+                            CLS.get(b.get("class"), np.nan), adj, fc]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
                 H.append(any(e.get("nat_win") is not None for e in de.values()))  # 出走表(勝率など)があるレースか
+                V.append(VENUE_IDX[code])
+                S.append(grade_cat(grades.get((code, day.isoformat()))) == "sgg1")
         for _, code, race, ents in by_day[day]:
             for e in ents:
                 c, p = e["course"], e.get("place")
                 s = selfc[e["regno"]][c]
                 if re.match(r"^\d?\.\d+$", e.get("st") or ""):
-                    stsum[e["regno"]] += [float(e["st"]), 1]
+                    (stF if fcnt[(e["regno"], f_period(day))] else stN)[e["regno"]] += [float(e["st"]), 1]
                 s[0] += 1
                 if p in (1, 2, 3):
                     s[p] += 1
@@ -108,7 +122,12 @@ def build():
                         oo[0] += 1
                         if o.get("place") in (1, 2, 3):
                             oo[o["place"]] += 1
-    return np.array(X), np.array(N), np.array(P), np.array(Y), np.array(F), np.array(H), races[0][0], races[-1][0]
+        for _, code, race, ents in by_day[day]:  # Fはその日のレースが終わってから数える
+            for e in ents:
+                if (e.get("st") or "").startswith("F") or (e.get("status") or "").startswith("F"):
+                    fcnt[(e["regno"], f_period(day))] += 1
+    return (np.array(X), np.array(N), np.array(P), np.array(Y), np.array(F), np.array(H), np.array(V), np.array(S, bool),
+            races[0][0], races[-1][0])
 
 
 def fit(X, N, P, Y):
@@ -163,10 +182,13 @@ def base_lq(X, N, P, W):
     return np.log(q / q.sum(1, keepdims=True) + 1e-12)
 
 
-def fit_logit(LQ, Z, Y, feats, use_cbias, rows=None):
-    """選んだ材料(feats)とコース補正の有無で、着ごとの係数を決める。"""
+def fit_logit(LQ, Z, Y, V, S, feats, use_cbias, rows=None):
+    """選んだ材料(feats)とコース補正の有無で、着ごとの係数を決める。
+    コース補正は 場ごと(場×コース) と SG・G1のとき(全場共通) の2つ。"""
     if rows is not None:
-        LQ, Z, Y = LQ[rows], Z[rows], Y[rows]
+        LQ, Z, Y, V, S = LQ[rows], Z[rows], Y[rows], V[rows], S[rows]
+    nv = len(VCODES)
+    sg = S.astype(float)[:, None]
     idx = np.arange(len(Y))
     nf = len(feats)
     Zs = Z[:, :, feats]
@@ -177,22 +199,50 @@ def fit_logit(LQ, Z, Y, feats, use_cbias, rows=None):
         for jj in range(j):
             excl[idx, Y[:, jj]] = 1
 
+        def biases(t):
+            vb = np.concatenate([np.zeros((nv, 1)), t[1 + nf:1 + nf + nv * 6].reshape(nv, 6)], axis=1)
+            sb = np.concatenate([[0], t[1 + nf + nv * 6:]])
+            return vb, sb
+
+        onehot = np.zeros((len(Y), 7))
+        onehot[idx, Y[:, j]] = 1
+        Vone = np.eye(nv)[V]  # (レース, 場)
+
         def loss(t):
             s = t[0] * LQ[:, :, j] + (Zs @ t[1:1 + nf] if nf else 0)
-            if use_cbias:  # コースの補正(全場共通): 内外の差が弱めに出るのを直す
-                s = s + np.concatenate([[0], t[1 + nf:]])[None, :]
+            if use_cbias:  # 場ごとのコース補正 + SG・G1のときのコース補正
+                vb, sb = biases(t)
+                s = s + vb[V] + sg * sb[None, :]
             s = np.where(excl == 1, -1e9, s)
             s = s - s.max(1, keepdims=True)
-            reg = 0.001 * (t[1 + nf:] ** 2).sum() if use_cbias else 0
-            return -(s[idx, Y[:, j]] - np.log(np.exp(s).sum(1))).mean() + reg
-        x0 = np.zeros(1 + nf + (6 if use_cbias else 0))
+            lse = np.log(np.exp(s).sum(1))
+            val = -(s[idx, Y[:, j]] - lse).mean()
+            # 勾配(計算を速くするため式で出す)
+            G = (np.exp(s - lse[:, None]) - onehot) / len(Y)
+            g = [np.sum(G * np.where(excl == 1, 0, LQ[:, :, j]))]
+            if nf:
+                g.append(np.einsum("rk,rkf->f", G, Zs))
+            if use_cbias:
+                g.append((Vone.T @ G)[:, 1:].ravel())
+                g.append((sg * G).sum(0)[1:])
+                val += 0.001 * (t[1 + nf:] ** 2).sum()
+            grad = np.concatenate([np.atleast_1d(x) for x in g])
+            if use_cbias:
+                grad[1 + nf:] += 0.002 * t[1 + nf:]
+            return val, grad
+        x0 = np.zeros(1 + nf + ((nv + 1) * 6 if use_cbias else 0))
         x0[0] = 1
-        t = minimize(loss, x0, method="L-BFGS-B").x
+        t = minimize(loss, x0, jac=True, method="L-BFGS-B").x
         full = [0.0] * len(FEATURES)
         for i, f in enumerate(feats):
             full[f] = round(float(t[1 + i]), 4)
         coefs.append([round(float(t[0]), 4)] + full)
-        cbias.append([0] + (np.round(t[1 + nf:], 4).tolist() if use_cbias else [0] * 6))
+        if use_cbias:
+            vb, sb = biases(t)
+            cbias.append({"venues": {c: np.round(vb[i], 4).tolist() for i, c in enumerate(VCODES)},
+                          "sgg1": np.round(sb, 4).tolist()})
+        else:
+            cbias.append({"venues": {c: [0] * 7 for c in VCODES}, "sgg1": [0] * 7})
     return coefs, cbias
 
 
@@ -200,14 +250,15 @@ PERMS = np.array([(a, b, c) for a in range(1, 7) for b in range(1, 7) for c in r
                   if a != b and b != c and a != c])
 
 
-def evaluate(LQ, Z, Y, coefs, cbias, rows):
+def evaluate(LQ, Z, Y, V, S, coefs, cbias, rows):
     """検証用: 指定したレースで、3連単上位10点・2連単上位3点・単勝の的中率。"""
-    LQ, Z, Y = LQ[rows], Z[rows], Y[rows]
+    LQ, Z, Y, V, S = LQ[rows], Z[rows], Y[rows], V[rows], S[rows]
     n = len(Y)
     ex = []
     for j in range(3):
         c = np.array(coefs[j])
-        s = c[0] * LQ[:, :, j] + Z @ c[1:] + np.array(cbias[j])[None, :]
+        vb = np.array([cbias[j]["venues"][cc] for cc in VCODES])
+        s = c[0] * LQ[:, :, j] + Z @ c[1:] + vb[V] + S.astype(float)[:, None] * np.array(cbias[j]["sgg1"])[None, :]
         s[:, 0] = -1e9
         ex.append(np.exp(s - s.max(1, keepdims=True)))
     s1, s2, s3 = ex
@@ -240,7 +291,7 @@ def main():
             if json.load(f).get("month") == f"{today:%Y-%m}":
                 print("今月の重みは作成済み")
                 return
-    X, N, P, Y, F, H, first, last = build()
+    X, N, P, Y, F, H, V, S, first, last = build()
     W, losses = fit(X, N, P, Y)  # コース別成績の重みは全期間で
     prog = np.where(H)[0]        # 材料の係数は、出走表があるレースだけで決める
     Zp, sd = standardize(F[prog])
@@ -257,9 +308,9 @@ def main():
     for mask in range(1 << (nfeat + 1)):
         feats = [i for i in range(nfeat) if mask >> i & 1]
         use_cb = bool(mask >> nfeat & 1)
-        c_tr, b_tr = fit_logit(LQ_tr, Z, Y, feats, use_cb, rows=tr)
-        ev = evaluate(LQ_tr, Z, Y, c_tr, b_tr, te)
-        c_all, b_all = fit_logit(LQ, Z, Y, feats, use_cb, rows=prog)
+        c_tr, b_tr = fit_logit(LQ_tr, Z, Y, V, S, feats, use_cb, rows=tr)
+        ev = evaluate(LQ_tr, Z, Y, V, S, c_tr, b_tr, te)
+        c_all, b_all = fit_logit(LQ, Z, Y, V, S, feats, use_cb, rows=prog)
         combos[str(mask)] = {"coef": c_all, "cbias": b_all, "eval": ev}
         print(f"組み合わせ {mask:3d}: {ev}")
     full = combos[str((1 << (nfeat + 1)) - 1)]
@@ -269,7 +320,7 @@ def main():
                    "from": first.isoformat(), "to": last.isoformat(), "loss": losses,
                    "W": np.round(W, 4).tolist(),
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
-                   "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)),
+                   "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
     print(f"重みを作成: {len(Y)}レース(材料の係数は {len(prog)}レース)、組み合わせ {len(combos)}通り")
 

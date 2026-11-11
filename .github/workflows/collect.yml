@@ -55,11 +55,6 @@ jobs:
       - name: 締切時オッズ(前日と今日の終わったレース)
         run: python -u scripts/odds.py --max-minutes 25
 
-      - name: 出目確率の重み(月1回)
-        run: |
-          pip install --quiet numpy scipy
-          python scripts/model.py
-
       - name: 保存
         run: |
           git config user.name "github-actions[bot]"

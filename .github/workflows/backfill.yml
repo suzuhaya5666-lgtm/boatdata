@@ -52,7 +52,7 @@ jobs:
             ${{ inputs.results_only == 'false' && ' ' || '--results-only' }} --workers 3 --max-minutes 300
 
       - name: 出目確率の重みを作り直す
-        run: python scripts/model.py --force
+        run: echo "重みは model ワークフローで作ります"
 
       - name: 保存
         run: |

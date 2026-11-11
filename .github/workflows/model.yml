@@ -1,0 +1,40 @@
+name: model
+
+# 出目確率の重みと係数を作り直す(毎月2日の朝)。時間がかかるので収集とは別にした。
+on:
+  schedule:
+    - cron: "17 18 1 * *"   # 毎月2日 3:17(日本時間)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: model
+  cancel-in-progress: false
+
+jobs:
+  model:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 重みを作る
+        run: |
+          pip install --quiet numpy scipy
+          python -u scripts/model.py --force
+      - name: 保存
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/model
+          if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
+          git commit -q -m "出目確率の重み $(TZ=Asia/Tokyo date '+%Y-%m')"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches -f ref=main

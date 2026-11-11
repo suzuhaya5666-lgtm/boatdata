@@ -188,6 +188,42 @@ def sheet(recs):
             "st": {k: {"n": len(x), "avg": round(statistics.mean(x), 3) if x else None} for k, x in st.items()}}
 
 
+FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F1本・2本以上、過去データから)
+
+
+def f_period(d):
+    """F数を数える期: 11/1〜4/30, 5/1〜10/31"""
+    if d.month >= 11:
+        return (d.year, 2)
+    if d.month <= 4:
+        return (d.year - 1, 2)
+    return (d.year, 1)
+
+
+def f_state(recs, today):
+    """今の期のF数と、F持ちを考えた平均ST(出目確率の材料)。"""
+    fcnt = collections.Counter()
+    n = [0.0, 0]
+    fs = [0.0, 0]
+    for date, _, _, _, _, _, _, _, st_raw, _, status in recs:
+        v = st_value(st_raw)
+        if v is not None:
+            a = fs if fcnt[f_period(date)] else n
+            a[0] += v
+            a[1] += 1
+        if (st_raw or "").startswith("F") or (status or "").startswith("F"):
+            fcnt[f_period(date)] += 1
+    f = fcnt[f_period(today)]
+    normal = n[0] / n[1] if n[1] else None
+    if f == 0:
+        adj = normal
+    elif fs[1] >= 5:
+        adj = fs[0] / fs[1]
+    else:
+        adj = normal + FDELTA[min(f, 2)] if normal is not None else None
+    return {"f": f, "st_adj": round(adj, 4) if adj is not None else None}
+
+
 def bucket(recs):
     """枠別着率と決まり手。"""
     b = {"n": 0, "p1": 0, "p2": 0, "p3": 0, "win": {}, "lost": {}, "nigashi": 0}
@@ -315,7 +351,8 @@ def main():
               "female": any(r[7] == "women" for r in recs1y),
               "sheet": {cat: sheet(rs) for cat in CATS
                         for rs in [[r for r in recs1y if in_cat(cat, r[7])]] if rs},
-              "bycourse": bycourse(recs, last)}
+              "bycourse": bycourse(recs, last),
+              "fst": f_state(recs, dt.datetime.now(JST).date())}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:
             json.dump(rr, f, ensure_ascii=False, separators=(",", ":"))
 
