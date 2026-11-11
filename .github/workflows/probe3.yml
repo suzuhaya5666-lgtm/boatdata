@@ -9,6 +9,9 @@ on:
       keys:
         description: "探す語(正規表現)"
         default: "tenji|original|orgtenji|chokuzen|before|lap|mawari|isshu|chokusen|一周|まわり|直線|周回|展示"
+      dump:
+        description: "本文を何文字出すか(空なら出さない)"
+        default: ""
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -16,6 +19,7 @@ jobs:
       - env:
           URLS: ${{ inputs.urls }}
           KEYS: ${{ inputs.keys }}
+          DUMP: ${{ inputs.dump }}
         run: |
           cat > p.py <<'PY'
           import re, subprocess, sys, html
@@ -29,6 +33,11 @@ jobs:
               h = get(u)
               print(f"\n######## {u} {len(h)}B")
               host = urlparse(u).netloc
+              if os.environ.get("DUMP"):
+                  t = re.sub(r"<script.*?</script>|<style.*?</style>", "", h, flags=re.S)
+                  t = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " | ", t)))
+                  t = re.sub(r"(\|\s*)+", "| ", t)
+                  for i in range(0, min(len(t), int(os.environ["DUMP"])), 300): print("TXT", t[i:i+300])
               urls = set()
               for m in re.finditer(r'(?:href|src|action|data-url|url)\s*[=:]\s*["\']([^"\'#]+)', h, re.I):
                   full = urljoin(u, m.group(1))
