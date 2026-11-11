@@ -189,7 +189,9 @@ def push():
         return
     run("git", "commit", "-m", f"直前情報 {dt.datetime.now(JST):%Y-%m-%d %H:%M}")
     for _ in range(3):
-        run("git", "pull", "--rebase", "-q")
+        # 同じファイルを別の実行が書いていても止まらないよう、ぶつかったら手元(新しく取った方)を優先する
+        if run("git", "pull", "--rebase", "-q", "-X", "theirs").returncode != 0:
+            run("git", "rebase", "--abort")
         if run("git", "push", "-q").returncode == 0:
             return
         time.sleep(5)
