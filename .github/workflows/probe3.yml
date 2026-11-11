@@ -13,15 +13,19 @@ jobs:
   probe:
     runs-on: ubuntu-latest
     steps:
-      - run: |
+      - env:
+          URLS: ${{ inputs.urls }}
+          KEYS: ${{ inputs.keys }}
+        run: |
           cat > p.py <<'PY'
           import re, subprocess, sys, html
           from urllib.parse import urljoin, urlparse
-          keys = re.compile(sys.argv[1], re.I)
+          import os
+          keys = re.compile(os.environ["KEYS"], re.I)
           def get(u):
               r = subprocess.run(["curl", "-sSL", "-4", "--max-time", "40", "-A", "Mozilla/5.0", u], capture_output=True)
               return r.stdout.decode("utf-8", errors="replace") if r.returncode == 0 else ""
-          for u in sys.argv[2:]:
+          for u in os.environ["URLS"].split():
               h = get(u)
               print(f"\n######## {u} {len(h)}B")
               host = urlparse(u).netloc
@@ -43,4 +47,4 @@ jobs:
                   for m in hits[:10]:
                       print("   JSCTX", re.sub(r"\s+", " ", t[max(0, m.start()-150): m.end()+200])[:350])
           PY
-          python3 p.py "${{ inputs.keys }}" ${{ inputs.urls }}
+          python3 p.py
