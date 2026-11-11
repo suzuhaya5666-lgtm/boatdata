@@ -1265,7 +1265,54 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     [1, 2, 3, 4, 5, 6].forEach((k, n) => { out[k][j] = ex[n] / sum; });
   }
   if (mask >> ng & 1) used.push("コース補正");
-  return { q: out, used, ev: combo.eval };
+  return { q: out, used, ev: combo.eval, Z };
+}
+// 予想決まり手: 場の平均の決まり手に、展示・平均ST・オリジナル展示・決まり手率の差を足す(scripts/model.py の kim_design と同じ並び)
+function kimPredict(km, model, Z, order, racers) {
+  const vm = km?.venues?.[state.venue];
+  if (!vm || !Z) return null;
+  const ALT = km.alt, TY = ["逃げ", "差し", "まくり", "まくり差し"], K3 = ["差し", "まくり", "まくり差し"];
+  const x = ALT.map(() => []);
+  km.feats.forEach(([f, sgn]) => {
+    const fi = model.features.indexOf(f);
+    const z = (k) => fi >= 0 ? sgn * (Z[k]?.[fi] || 0) : 0;
+    TY.forEach((t) => ALT.forEach(([k, tt], a) => x[a].push(tt === t && k >= 1 ? z(k) : 0)));
+    K3.forEach((t) => ALT.forEach(([k, tt], a) => x[a].push(tt === t && k >= 2 ? z(1) : 0)));
+  });
+  const rate = (k, ti) => {
+    const r = racers[order[k]]?.kim;
+    return k === 1 ? r?.c1?.rate?.[ti] : r?.[String(k)]?.rate?.[ti];
+  };
+  ALT.forEach(([k, tt], a) => {
+    let va = 0, vb = 0;
+    if (k >= 2) {
+      const ti = K3.indexOf(tt);
+      const ra = rate(k, ti), rb = rate(1, ti);
+      va = ra != null ? Math.log(ra + 1e-3) - vm.lr_mean[0][a] : 0;
+      vb = rb != null ? Math.log(rb + 1e-3) - vm.lr_mean[1][a] : 0;
+    } else if (k === 1) {
+      const r = [0, 1, 2].map((ti) => rate(1, ti));
+      vb = r.every((y) => y != null) ? Math.log(Math.min(Math.max(1 - r[0] - r[1] - r[2], 0.05), 1)) - vm.lr_mean[1][a] : 0;
+    }
+    x[a].push(va, vb);
+  });
+  const sc = ALT.map((_, a) => vm.a[a] + x[a].reduce((s, v, i) => s + v * vm.b[i], 0));
+  const mx = Math.max(...sc);
+  const ex = sc.map((v) => Math.exp(v - mx));
+  const sum = ex.reduce((a, b) => a + b, 0);
+  return ALT.map(([k, t], a) => ({ k, t, p: ex[a] / sum, avg: vm.avg[a] }));
+}
+function kimCardHtml(pred, vname) {
+  if (!pred) return "";
+  const rows = pred.filter((r) => r.avg >= 0.015 || r.p >= 0.03).map((r) => {
+    const d = r.p - r.avg, rel = r.avg ? r.p / r.avg : 1;
+    const cls = rel >= 1.3 ? "color:#e03131;font-weight:700" : rel <= 0.75 ? "color:#1971c2" : "";
+    return `<tr><td style="text-align:left">${r.k ? `${r.k}コース ` : ""}${r.t === "その他" ? "抜き・恵まれなど" : r.t}</td><td>${(r.avg * 100).toFixed(1)}%</td>
+      <td style="${cls}">${(r.p * 100).toFixed(1)}%</td><td style="${cls}">${d >= 0 ? "+" : ""}${(d * 100).toFixed(1)}</td></tr>`;
+  }).join("");
+  return `<div class="card"><h2>予想決まり手</h2>
+    <div class="tbl"><table class="cmp"><thead><tr><th>決まり手</th><th>${esc(vname)}の平均</th><th>このレース</th><th>差</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="note">場の平均の決まり手に、各艇の展示タイム・平均ST・決まり手率（3年分）${state.venue === "07" ? "・オリジナル展示" : ""}の差を足して予想しています。平均の1.3倍以上は赤、0.75倍以下は青。検証では、平均だけより決まり手がはっきり当たるようになりました（出目確率そのものには入れていません）。</div></div>`;
 }
 // 材料のまとまり(オン・オフの単位)。古い重みファイルは材料1つずつ
 function featGroups(model) {
@@ -1349,6 +1396,7 @@ async function drawDemeTab(v, race) {
     cached("data/model/weights.json"), cached("data/stats/venues.json"),
     getBefore(hd, state.venue, race.no),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
+  const kimModel = await cached("data/model/kimarite.json");
   if (state.dtab !== "deme") return;
   if (!model || !vs) { $("view-race").innerHTML = '<div class="empty">出目確率のデータがまだありません。</div>'; return; }
   const racers = Object.fromEntries(race.entries.map((e, i) => [e.boat, files[i]]));
@@ -1425,6 +1473,7 @@ async function drawDemeTab(v, race) {
         入れ替えたい2つの枠を順にタップすると入れ替わります。</div>
       ${custom ? '<button class="pill2" id="resetOrder" style="margin-top:8px">' + (bi?.start?.length === 6 ? "展示進入" : "枠なり") + "に戻す</button>" : ""}
     </div>
+    ${kimCardHtml(kimPredict(kimModel, model, adj.Z, order, racers), v.name)}
     ${featCard(model, adj)}
     <div class="card">
       <h2>頭固定</h2>

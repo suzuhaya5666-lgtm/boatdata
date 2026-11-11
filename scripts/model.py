@@ -84,6 +84,11 @@ def build():
     for r in races:
         by_day[r[0]].append(r)
     X, N, P, Y, F, H, V, S, KD = [], [], [], [], [], [], [], [], []
+    KR, KY = [], []   # 決まり手率(1コース: 被差し・被まくり・被まくり差し、2〜6: 差し・まくり・まくり差し)と、実際の決まり手
+    klost = collections.defaultdict(lambda: np.zeros(4))
+    kwin = collections.defaultdict(lambda: np.zeros(4))
+    glost = np.zeros(4)
+    gwin = collections.defaultdict(lambda: np.zeros(4))
     for day in sorted(by_day):
         if day >= first + dt.timedelta(days=WARMUP_DAYS):
             for _, code, race, ents in by_day[day]:
@@ -126,6 +131,14 @@ def build():
                 V.append(VENUE_IDX[code])
                 S.append(grade_cat(grades.get((code, day.isoformat()))) == "sgg1")
                 KD.append(race_kind(race.get("name")))
+                kr = np.zeros((7, 3))
+                a = klost[courses[1]["regno"]]
+                kr[1] = (a[1:] + KIM_M * glost[1:] / max(glost[0], 1)) / (a[0] + KIM_M)
+                for k in range(2, 7):
+                    b, g = kwin[(courses[k]["regno"], k)], gwin[k]
+                    kr[k] = (b[1:] + KIM_M * g[1:] / max(g[0], 1)) / (b[0] + KIM_M)
+                KR.append(kr)
+                KY.append(kim_alt(pl[1], race.get("kimarite")))
         for _, code, race, ents in by_day[day]:
             for e in ents:
                 c, p = e["course"], e.get("place")
@@ -145,12 +158,28 @@ def build():
                         oo[0] += 1
                         if o.get("place") in (1, 2, 3):
                             oo[o["place"]] += 1
+        for _, code, race, ents in by_day[day]:  # 決まり手もその日が終わってから数える
+            km = race.get("kimarite")
+            winner = next((e for e in ents if e.get("place") == 1), None)
+            for e in ents:
+                if e["course"] == 1:
+                    klost[e["regno"]][0] += 1
+                    glost[0] += 1
+                    if winner is not None and winner is not e and km in KM3:
+                        klost[e["regno"]][1 + KM3.index(km)] += 1
+                        glost[1 + KM3.index(km)] += 1
+                elif 2 <= e["course"] <= 6:
+                    kwin[(e["regno"], e["course"])][0] += 1
+                    gwin[e["course"]][0] += 1
+                    if e is winner and km in KM3:
+                        kwin[(e["regno"], e["course"])][1 + KM3.index(km)] += 1
+                        gwin[e["course"]][1 + KM3.index(km)] += 1
         for _, code, race, ents in by_day[day]:  # Fはその日のレースが終わってから数える
             for e in ents:
                 if (e.get("st") or "").startswith("F") or (e.get("status") or "").startswith("F"):
                     fcnt[(e["regno"], f_period(day))] += 1
     return (np.array(X), np.array(N), np.array(P), np.array(Y), np.array(F), np.array(H), np.array(V), np.array(S, bool),
-            np.array(KD), races[0][0], races[-1][0])
+            np.array(KD), np.array(KR), np.array(KY), races[0][0], races[-1][0])
 
 
 def fit(X, N, P, Y):
@@ -182,6 +211,87 @@ def fit(X, N, P, Y):
         W_all[j] = unpack(r.x)
         losses.append(round(float(r.fun), 4))
     return W_all, losses
+
+
+# ---------------------------------------------------------------- 予想決まり手
+KM3 = ("差し", "まくり", "まくり差し")
+KIM_M = 20
+KIM_TY = ["逃げ", "差し", "まくり", "まくり差し"]
+KIM_ALT = [(1, "逃げ")] + [(k, t) for k in range(2, 7) for t in KM3] + [(0, "その他")]
+KIM_FEATS = [("exh", -1), ("avg_st", -1), ("lap", 1), ("turn", 1), ("straight", 1)]  # 標準化した値に掛ける向き(速いほど+)
+
+
+def kim_alt(win_course, km):
+    for a, (k, t) in enumerate(KIM_ALT):
+        if k == win_course and t == km:
+            return a
+    return len(KIM_ALT) - 1
+
+
+def kim_design(Z, KR, lr_mean=None):
+    """選択肢(勝つコース×決まり手)ごとの説明変数。画面(index.html)でも同じ並びで計算する。
+    列: 材料ごとに [攻める艇(決まり手4種)、1コース(差し・まくり・まくり差し)] の7列、最後に決まり手率2列。"""
+    R, NA = len(Z), len(KIM_ALT)
+    cols = []
+    for f, sgn in KIM_FEATS:
+        z = sgn * Z[:, :, FEATURES.index(f)]
+        for t in KIM_TY:
+            a = np.zeros((R, NA))
+            for ai, (k, tt) in enumerate(KIM_ALT):
+                if tt == t and k >= 1:
+                    a[:, ai] = z[:, k]
+            cols.append(a)
+        for t in KM3:
+            b = np.zeros((R, NA))
+            for ai, (k, tt) in enumerate(KIM_ALT):
+                if tt == t and k >= 2:
+                    b[:, ai] = z[:, 1]
+            cols.append(b)
+    a = np.zeros((R, NA))
+    b = np.zeros((R, NA))
+    for ai, (k, tt) in enumerate(KIM_ALT):
+        if k >= 2:
+            ti = KM3.index(tt)
+            a[:, ai] = np.log(KR[:, k, ti] + 1e-3)
+            b[:, ai] = np.log(KR[:, 1, ti] + 1e-3)
+        elif k == 1:
+            b[:, ai] = np.log(np.clip(1 - KR[:, 1, :].sum(1), 0.05, 1))
+    if lr_mean is None:
+        lr_mean = [a.mean(0).tolist(), b.mean(0).tolist()]
+    cols += [a - np.array(lr_mean[0]), b - np.array(lr_mean[1])]
+    return np.stack(cols, 2), lr_mean
+
+
+def fit_kim(X, y, l2=0.003):
+    NA, p, n = X.shape[1], X.shape[2], len(y)
+
+    def f(t):
+        s = np.concatenate([[0], t[:NA - 1]])[None, :] + X @ t[NA - 1:]
+        s = s - s.max(1, keepdims=True)
+        lse = np.log(np.exp(s).sum(1))
+        G = np.exp(s - lse[:, None])
+        G[np.arange(n), y] -= 1
+        G /= n
+        return (-(s[np.arange(n), y] - lse).mean() + l2 * (t[NA - 1:] ** 2).sum(),
+                np.concatenate([G.sum(0)[1:], np.einsum("ra,rap->p", G, X) + 2 * l2 * t[NA - 1:]]))
+    t = minimize(f, np.zeros(NA - 1 + p), jac=True, method="L-BFGS-B").x
+    return np.concatenate([[0], t[:NA - 1]]), t[NA - 1:]
+
+
+def kim_models(Z, KR, KY, V, prog):
+    """場ごとに予想決まり手の係数を決める(平均だけの分も)。"""
+    out = {"alt": [[k, t] for k, t in KIM_ALT], "feats": KIM_FEATS, "venues": {}}
+    for vi, c in enumerate(VCODES):
+        rows = prog[V[prog] == vi]
+        if len(rows) < 300:
+            continue
+        X, lr_mean = kim_design(Z[rows], KR[rows])
+        y = KY[rows]
+        a, b = fit_kim(X, y)
+        avg = np.bincount(y, minlength=len(KIM_ALT)) / len(y)
+        out["venues"][c] = {"a": np.round(a, 4).tolist(), "b": np.round(b, 4).tolist(), "lr_mean": np.round(lr_mean, 4).tolist(),
+                            "avg": np.round(avg, 4).tolist(), "races": int(len(rows))}
+    return out
 
 
 _org_cache = {}
@@ -360,7 +470,7 @@ def main():
             if json.load(f).get("month") == f"{today:%Y-%m}":
                 print("今月の重みは作成済み")
                 return
-    X, N, P, Y, F, H, V, S, KD, first, last = build()
+    X, N, P, Y, F, H, V, S, KD, KR, KY, first, last = build()
     W, losses = fit(X, N, P, Y)  # コース別成績の重みは全期間で
     prog = np.where(H)[0]        # 材料の係数は、出走表があるレースだけで決める
     import warnings
@@ -396,6 +506,10 @@ def main():
                    "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
+    kim = kim_models(Z, KR, KY, V, prog)
+    with open(os.path.join(os.path.dirname(OUT), "kimarite.json"), "w", encoding="utf-8") as f:
+        json.dump(kim, f, ensure_ascii=False, separators=(",", ":"))
+    print("予想決まり手: " + ", ".join(f"{c} {v['races']}レース" for c, v in kim["venues"].items()))
     print(f"重みを作成: {len(Y)}レース(材料の係数は {len(prog)}レース)、組み合わせ {len(combos)}通り")
 
 
