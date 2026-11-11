@@ -1,0 +1,46 @@
+name: probe3
+# 調査用: ページと、そのページが読み込む同じサイトのJSを取り、キーワードの前後を出す(保存しない)
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "調べるURL(空白区切り)"
+        required: true
+      keys:
+        description: "探す語(正規表現)"
+        default: "tenji|original|orgtenji|chokuzen|before|lap|mawari|isshu|chokusen|一周|まわり|直線|周回|展示"
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          cat > p.py <<'PY'
+          import re, subprocess, sys, html
+          from urllib.parse import urljoin, urlparse
+          keys = re.compile(sys.argv[1], re.I)
+          def get(u):
+              r = subprocess.run(["curl", "-sSL", "-4", "--max-time", "40", "-A", "Mozilla/5.0", u], capture_output=True)
+              return r.stdout.decode("utf-8", errors="replace") if r.returncode == 0 else ""
+          for u in sys.argv[2:]:
+              h = get(u)
+              print(f"\n######## {u} {len(h)}B")
+              host = urlparse(u).netloc
+              urls = set()
+              for m in re.finditer(r'(?:href|src|action|data-url|url)\s*[=:]\s*["\']([^"\'#]+)', h, re.I):
+                  full = urljoin(u, m.group(1))
+                  if keys.search(full): urls.add(full)
+              for x in sorted(urls)[:60]: print("URL", x)
+              for m in list(keys.finditer(re.sub(r"\s+", " ", h)))[:8]:
+                  b = re.sub(r"\s+", " ", h)
+                  print("CTX", b[max(0, m.start()-120): m.end()+200][:320])
+              js = [urljoin(u, s) for s in re.findall(r'<script[^>]+src="([^"]+)"', h)]
+              for j in js:
+                  if urlparse(j).netloc != host: continue
+                  t = get(j)
+                  hits = list(keys.finditer(t))
+                  if not hits: continue
+                  print(f"--- JS {j} {len(t)}B hits {len(hits)}")
+                  for m in hits[:10]:
+                      print("   JSCTX", re.sub(r"\s+", " ", t[max(0, m.start()-150): m.end()+200])[:350])
+          PY
+          python3 p.py "${{ inputs.keys }}" ${{ inputs.urls }}
