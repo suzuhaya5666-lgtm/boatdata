@@ -608,10 +608,23 @@ async function getOdds(hd, venue, no) {
 
 async function drawResultTab(v, race) {
   loading();
-  const done = race.entries.some((e) => e.place != null || e.status);
+  const race0 = race;
+  let done = race.entries.some((e) => e.place != null || e.status);
+  let quick = null;
   if (!done) {
-    $("view-race").innerHTML = '<div class="empty">結果はまだです。結果は夜（23:37・1:07）と朝の取り込みで入ります。</div>';
-    return;
+    // 公式の結果ファイルが入る前は、5分ごとに取っている速報を使う
+    quick = await getLive(state.date.replace(/-/g, ""), state.venue, race.no, "_res");
+    if (state.dtab !== "result") return;
+    if (!quick?.places?.length) {
+      $("view-race").innerHTML = `<div class="empty">結果はまだです。<br>レース後5〜45分の間に5分ごとに速報を取り込みます（正式な結果は夜と朝の取り込みで入ります）。
+        <br><button class="pill2" id="rreload" style="margin-top:10px">⟳ 結果取得</button></div>`;
+      $("rreload").onclick = () => { $("rreload").textContent = "読み込み中…"; drawResultTab(v, race0); };
+      return;
+    }
+    const pl = Object.fromEntries(quick.places.map((x) => [x.boat, x.place]));
+    race = { ...race, kimarite: quick.kimarite, payouts: quick.payouts,
+      entries: race.entries.map((e) => ({ ...e, place: pl[e.boat] ?? null, st: quick.st?.[e.boat] ?? e.st, course: quick.course?.[e.boat] ?? e.course })) };
+    done = true;
   }
   const [od, dm] = await Promise.all([getOdds(state.date.replace(/-/g, ""), state.venue, race.no), computeDeme(race)]);
   if (state.dtab !== "result") return;
@@ -674,7 +687,8 @@ async function drawResultTab(v, race) {
 
   $("view-race").innerHTML = `
     <div class="card">
-      <h2>${esc(v.name)} ${race.no}R 結果</h2>
+      <h2>${esc(v.name)} ${race.no}R 結果${quick ? ' <span class="otag">速報</span>' : ""}</h2>
+      ${quick ? `<div class="orow"><span class="otime">速報 ${esc(quick.time || "")} 取得（正式な結果は夜と朝の取り込みで置き換わります）</span><button class="pill2" id="rreload">⟳ 結果取得</button></div>` : ""}
       <div class="meta">${w ? `<span>${esc(w.sky)} 風 ${esc(w.wind_dir)} ${w.wind}m 波 ${w.wave}cm</span>` : ""}
         ${race.kimarite ? `<span>決まり手 <b>${esc(race.kimarite)}</b></span>` : ""}</div>
       <div class="tbl"><table class="grid2"><thead><tr><th>着</th><th>枠</th><th>選手</th><th>進入</th><th>ST</th><th>展示</th><th>タイム</th></tr></thead>
@@ -682,6 +696,7 @@ async function drawResultTab(v, race) {
     </div>
     ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}
     <div class="card"><h2>オッズ</h2>${oddsHtml}</div>`;
+  const rr = $("rreload"); if (rr) rr.onclick = () => { rr.textContent = "読み込み中…"; drawResultTab(v, race0); };
 }
 
 // ---------------------------------------------------------------- オッズタブ
@@ -692,8 +707,8 @@ const DEME_KEY = { "3t": "3連単", "3f": "3連複", "2t": "2連単", "2f": "2�
 const ORDERED = { "3t": true, "2t": true };
 
 // 最新のオッズ: GitHub の API から直接(サイトの公開を待たない)。なければ締切時オッズ
-async function getLive(hd, venue, no) {
-  const path = `data/live/${hd}/${venue}_${String(no).padStart(2, "0")}.json`;
+async function getLive(hd, venue, no, suffix = "") {
+  const path = `data/live/${hd}/${venue}_${String(no).padStart(2, "0")}${suffix}.json`;
   try {
     const r = await fetch(`https://api.github.com/repos/suzuhaya5666-lgtm/boatdata/contents/${path}?ref=main`,
       { headers: { Accept: "application/vnd.github.raw" }, cache: "no-store" });

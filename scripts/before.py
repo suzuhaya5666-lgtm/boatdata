@@ -118,6 +118,80 @@ def complete(info):
     return len(info["entries"]) == 6 and all(e["exh"] is not None for e in ents if e.get("weight"))
 
 
+RESULT_URL = "https://www.boatrace.jp/owpc/pc/race/raceresult?rno={rno}&jcd={jcd}&hd={hd}"
+RESULT_FROM, RESULT_TO = 5, 45   # 締切の何分後から何分後まで結果を取りに行くか
+Z2H = str.maketrans("０１２３４５６７８９", "0123456789")
+
+
+def parse_result(html):
+    """公式サイトのレース結果ページ → 着順・決まり手・払戻・ST(速報)。"""
+    import html as H
+    out = {"places": [], "payouts": {}, "kimarite": None, "st": {}}
+    t = html.split("スタート情報")[0]
+    for m in re.finditer(r'<td class="is-fs14">([０-９0-9])</td>\s*<td class="is-fs14 is-fBold is-boatColor(\d)">\d</td>\s*'
+                         r'<td class="is-p10-0">\s*<span class="is-fs12">(\d{4})</span>', t):
+        out["places"].append({"place": int(m.group(1).translate(Z2H)), "boat": int(m.group(2)), "regno": m.group(3)})
+    out["course"] = {}
+    for c, m in enumerate(re.finditer(r'table1_boatImage1Number is-type\d">(\d)</span>.*?table1_boatImage1TimeInner[^>]*>([^<]*)<', html, re.S), 1):
+        v = H.unescape(m.group(2)).replace("\xa0", " ").split()
+        out["st"][m.group(1)] = v[0] if v else ""
+        out["course"][m.group(1)] = c   # スタート情報は進入コースの順に並んでいる
+    m = re.search(r'<th>決まり手</th>.*?<td class="is-fs16">([^<]+)</td>', html, re.S)
+    if m:
+        out["kimarite"] = H.unescape(m.group(1)).strip() or None
+    for body in re.findall(r"<tbody>(.*?)</tbody>", html, re.S):
+        bm = re.search(r'<td rowspan="\d+">(3連単|3連複|2連単|2連複|拡連複|単勝|複勝)</td>', body)
+        if not bm:
+            continue
+        bet = bm.group(1)
+        for tr in re.findall(r"<tr[^>]*>(.*?)</tr>", body, re.S):
+            nums = re.findall(r'numberSet1_number[^>]*>(\d)<', tr)
+            if not nums:
+                nums = re.findall(r'<span class="numberSet1_number is-type(\d)"', tr)
+            ym = re.search(r'is-payout1">&yen;([\d,]+)<', tr)
+            if not nums or not ym:
+                continue
+            pm = re.findall(r"<td>(\d+)</td>", tr)
+            combo = "-".join(sorted(nums) if "複" in bet else nums)
+            out["payouts"].setdefault(bet, []).append({"combo": combo, "yen": int(ym.group(1).replace(",", "")),
+                                                       "pop": int(pm[-1]) if pm else None})
+    return out
+
+
+def fetch_live_results(day, now):
+    """締切5〜45分後のレースの結果(速報)を取り、data/live/<日付>/<場>_<R>_res.json に保存する。"""
+    outdir = os.path.join(DATA, "live", f"{now:%Y%m%d}")
+    got = 0
+    for code, v in day["venues"].items():
+        for no, race in v["races"].items():
+            if not race.get("deadline"):
+                continue
+            hh, mm = map(int, race["deadline"].split(":"))
+            dl = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+            if not (dl + dt.timedelta(minutes=RESULT_FROM) <= now <= dl + dt.timedelta(minutes=RESULT_TO)):
+                continue
+            path = os.path.join(outdir, f"{code}_{int(no):02d}_res.json")
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as f:
+                    if json.load(f).get("complete"):
+                        continue
+            r = subprocess.run(["curl", "-sS", "-4", "--max-time", "20", "-A", "Mozilla/5.0 (personal data collection)",
+                                RESULT_URL.format(rno=int(no), jcd=code, hd=f"{now:%Y%m%d}")], capture_output=True)
+            if r.returncode != 0:
+                continue
+            res = parse_result(r.stdout.decode("utf-8", errors="replace"))
+            if not res["places"]:
+                continue
+            res["complete"] = bool(res["payouts"].get("3連単"))
+            res["time"] = dt.datetime.now(JST).strftime("%H:%M")
+            os.makedirs(outdir, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(res, f, ensure_ascii=False, separators=(",", ":"))
+            got += 1
+    if got:
+        print(f"結果(速報) {got}レース")
+
+
 def fetch_once():
     """締切が近いレースの直前情報を取る。戻り値: (保存件数, 今日のまだ終わっていないレースがあるか)"""
     now = dt.datetime.now(JST)
@@ -137,7 +211,7 @@ def fetch_once():
                 continue
             hh, mm = map(int, race["deadline"].split(":"))
             dl = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-            if now <= dl + dt.timedelta(minutes=AFTER_MIN):
+            if now <= dl + dt.timedelta(minutes=RESULT_TO):  # 結果の速報を取り終えるまで続ける
                 remaining = True
             if not (dl - dt.timedelta(minutes=BEFORE_MIN) <= now <= dl + dt.timedelta(minutes=AFTER_MIN)):
                 continue
@@ -174,6 +248,10 @@ def fetch_once():
         fetch_live_odds(day, now)
     except Exception as e:  # オッズが失敗しても直前情報は続ける
         print(f"オッズ失敗 {e}")
+    try:
+        fetch_live_results(day, now)
+    except Exception as e:
+        print(f"結果(速報)失敗 {e}")
     return got, remaining
 
 
