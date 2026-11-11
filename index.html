@@ -1472,6 +1472,7 @@ async function drawDemeTab(v, race, keepPos) {
     getBefore(hd, state.venue, race.no),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
   const kimModel = await cached("data/model/kimarite.json");
+  const nige2 = await cached("data/model/nige2.json");
   if (state.dtab !== "deme") return;
   if (!model || !vs) { $("view-race").innerHTML = '<div class="empty">出目確率のデータがまだありません。</div>'; return; }
   const racers = Object.fromEntries(race.entries.map((e, i) => [e.boat, files[i]]));
@@ -1534,6 +1535,29 @@ async function drawDemeTab(v, race, keepPos) {
   const triSel = triB.filter((t) => mode === "all" ? true : mode === "nige" ? t.b[0] === b1 : t.b[0] !== b1);
   const triN = Math.min(state.triN || 20, triSel.length);
   const selP = triSel.reduce((a, t) => a + t.p, 0);
+  // 逃げたときの2着(1-2か1-3か): このレースの確率と、同じ場で1コースの差され率が同じ段の過去の割合
+  const nige2Card = () => {
+    if (!nigeP) return "";
+    const r1 = racers[b1]?.kim?.c1?.rate?.[0];
+    const th = nige2?.thresholds || [0.095, 0.137];
+    const lvl = r1 == null ? null : r1 < th[0] ? 0 : r1 < th[1] ? 1 : 2;
+    const past = lvl == null ? null : nige2?.venues?.[state.venue]?.[String(lvl)];
+    const rows = [2, 3, 4, 5, 6].map((c) => {
+      const b = boatOf(c);
+      const pAbs = triB.filter((t) => t.b[0] === b1 && t.b[1] === b).reduce((a, t) => a + t.p, 0);
+      return { c, b, pAbs, pCond: pAbs / nigeP, past: past ? past.p2[c - 2] : null };
+    });
+    const top = [...rows].sort((x, y) => y.pCond - x.pCond)[0];
+    const r2 = rows[0], r3 = rows[1];
+    const lead = Math.abs(r2.pCond - r3.pCond) < 0.03 ? `${bb(r2.b)}と${bb(r3.b)}はほぼ互角`
+      : r2.pCond > r3.pCond ? `${bb(b1)}-${bb(r2.b)}が優勢` : `${bb(b1)}-${bb(r3.b)}が優勢`;
+    return `<div class="card"><h2>逃げたときの2着（${bb(b1)}-2コースか、${bb(b1)}-3コースか）</h2>
+      <div class="meta"><span><b>${lead}</b></span>${r1 != null ? `<span>${bb(b1)}の差され率 ${(r1 * 100).toFixed(1)}%（${["低", "中", "高"][lvl]}）</span>` : ""}</div>
+      <div class="tbl"><table class="cmp"><thead><tr><th>2着</th><th>このレース<br>(逃げた中で)</th><th>${bb(b1)}-○-全</th><th>${esc(v.name)}の過去<br>差され率${lvl != null ? ["低", "中", "高"][lvl] : "-"}の1コース</th></tr></thead><tbody>
+      ${rows.map((x) => `<tr class="${x === top ? "hit" : ""}"><td>${x.c}コース ${bb(x.b)}</td><td><b>${(x.pCond * 100).toFixed(1)}%</b></td><td>${(x.pAbs * 100).toFixed(1)}%</td><td>${x.past != null ? (x.past * 100).toFixed(1) + "%" : "-"}</td></tr>`).join("")}
+      </tbody></table></div>
+      <div class="note">「このレース(逃げた中で)」は、${bb(b1)}が1着になったときに各艇が2着に来る割合（出目確率から）。「${bb(b1)}-○-全」は、その2連単の頭からの確率です。右の列は、同じ場で1コースの選手の差され率が同じ段だったレース（3年分、逃げた${past ? past.n.toLocaleString() : "-"}レース）で、実際に2着に来た割合。差されにくい1コースは3コースが2着に残りやすい、などの傾向の目安に。</div></div>`;
+  };
   const triRows = triSel.slice(0, triN).map((t, i) => `
     <tr class="${isHit(t.b) ? "hit" : ""}"><td>${i + 1}</td><td class="combo">${t.b.map(bb).join("-")}</td>
       <td>${(t.p * 100).toFixed(2)}%</td>${mode === "all" ? "" : `<td>${selP ? (t.p / selP * 100).toFixed(1) : "-"}%</td>`}<td>${(1 / t.p).toFixed(1)}倍</td></tr>`).join("");
@@ -1580,6 +1604,7 @@ async function drawDemeTab(v, race, keepPos) {
       <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th><th>3連対</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
     </div>
+    ${nige2Card()}
     <div class="card">
       <h2>3連単ランキング</h2>
       <div class="pills">${[["all", "総合"], ["nige", "逃げ"], ["other", "逃げ以外"]].map(([k, l]) => `<button class="pill2 ${mode === k ? "on" : ""}" data-trimode="${k}">${l}</button>`).join("")}</div>
