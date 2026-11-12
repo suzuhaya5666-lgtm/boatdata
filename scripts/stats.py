@@ -173,7 +173,7 @@ def sheet(recs):
     course, others = {}, {}
     st = {k: [] for k in ("total", "slow", "dash", "day", "night", "c1", "c2", "c3", "c4", "c5", "c6")}
     f = l = 0
-    for date, code, c, place, _, _, _, _, st_raw, oth, status in recs:
+    for date, code, c, place, _, _, _, _, st_raw, oth, status, *_ in recs:
         add(course.setdefault(str(c), counter()), place)
         o = others.setdefault(str(c), {})
         for oc, op in oth:
@@ -207,7 +207,7 @@ def f_state(recs, today):
     fcnt = collections.Counter()
     n = [0.0, 0]
     fs = [0.0, 0]
-    for date, _, _, _, _, _, _, _, st_raw, _, status in recs:
+    for date, _, _, _, _, _, _, _, st_raw, _, status, *_ in recs:
         v = st_value(st_raw)
         if v is not None:
             a = fs if fcnt[f_period(date)] else n
@@ -233,7 +233,7 @@ def kim_counts(recs):
     """全期間の決まり手の回数。1コース: 出走と負けた決まり手、2〜6コース: 出走と勝った決まり手。"""
     c1 = [0, 0, 0, 0]
     ck = {k: [0, 0, 0, 0] for k in range(2, 7)}
-    for _, _, c, place, own, lost, _, _, _, _, _ in recs:
+    for _, _, c, place, own, lost, _, _, _, _, _, *_ in recs:
         if c == 1:
             c1[0] += 1
             if lost in KM3:
@@ -251,7 +251,7 @@ KIM_M = 20  # 回数が少ない選手は全体の率に20走分寄せる(出目
 def bucket(recs):
     """枠別着率と決まり手。"""
     b = {"n": 0, "p1": 0, "p2": 0, "p3": 0, "win": {}, "lost": {}, "nigashi": 0}
-    for _, _, _, place, own, lost, c1won, _, _, _, _ in recs:
+    for _, _, _, place, own, lost, c1won, _, _, _, _, *_ in recs:
         b["n"] += 1
         if place in (1, 2, 3):
             b[f"p{place}"] += 1
@@ -353,7 +353,7 @@ def main():
                 date, code, e["course"], e.get("place"),
                 km if e.get("place") == 1 and km else None,
                 km if e["course"] == 1 and winner is not None and winner is not e and km else None,
-                e["course"] >= 2 and c1won, cat, e.get("st"), oth, e.get("status")))
+                e["course"] >= 2 and c1won, cat, e.get("st"), oth, e.get("status"), e.get("boat")))
             if e.get("name"):
                 names[e["regno"]] = e["name"]
             vc = venues_count.setdefault(e["regno"], {})
@@ -388,6 +388,25 @@ def main():
                       **{str(k): {"n": kc[regno][1][k][0], "rate": shrink(kc[regno][1][k], gk[k])} for k in range(2, 7)}}}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:
             json.dump(rr, f, ensure_ascii=False, separators=(",", ":"))
+
+    # ---- 前付け(枠番 → 進入コース)。直近1年・全場。前付けする選手だけ data/stats/maetsuke.json に
+    mae = {}
+    for regno, recs in hist.items():
+        recs1y = [r for r in recs if r[0] > year_ago and r[11] and r[2] and 1 <= r[2] <= 6]
+        if len(recs1y) < 10:
+            continue
+        m = [[0] * 7 for _ in range(7)]   # m[枠][コース]
+        for r in recs1y:
+            m[r[11]][r[2]] += 1
+        n_out = sum(sum(m[b]) for b in range(2, 7))
+        n_mae = sum(m[b][c] for b in range(2, 7) for c in range(1, b))
+        if n_out < 5 or n_mae / n_out < 0.05:
+            continue
+        mae[regno] = {"name": names.get(regno, ""), "n": n_out, "rate": round(n_mae / n_out, 3),
+                      "m": {str(b): m[b][1:] for b in range(1, 7) if sum(m[b])}}
+    with open(os.path.join(DATA, "stats", "maetsuke.json"), "w", encoding="utf-8") as f:
+        json.dump({"period": rperiod, "racers": mae}, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"前付けする選手 {len(mae)}人")
 
     # ---- モーター
     starts = motor_starts()

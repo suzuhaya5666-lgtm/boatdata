@@ -80,6 +80,9 @@
   .race .badge.wait { background: #e9ecef; color: var(--sub); }
   .hare { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
   .harerest { font-size: 12px; color: #c92a2a; font-weight: 700; }
+  .mae { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #fff0f6; color: #a61e4d; border: 1px solid #fcc2d7; vertical-align: middle; }
+  .mae.on { background: #c2255c; color: #fff; border-color: #c2255c; }
+  td.maec { background: #ffe3e3; color: #c92a2a; font-weight: 700; }
   .arebadge { font-size: 13px; font-weight: 700; padding: 3px 7px; border-radius: 6px; white-space: nowrap; }
   .arebadge.l3 { background: #c92a2a; color: #fff; } .arebadge.l2 { background: #f76707; color: #fff; }
   .arebadge.l1 { background: #fff3bf; color: #8a5a00; } .arebadge.l0 { background: #e7f5ff; color: #1864ab; }
@@ -315,6 +318,7 @@ async function init() {
     $("view-race").innerHTML = '<div class="empty">まだデータがありません。</div>';
     return;
   }
+  MAE = (await cached("data/stats/maetsuke.json"))?.racers || {};
   const list = dayList();
   const today = nowJST().date;
   const start = list.includes(today) ? today : list[list.length - 1];
@@ -464,7 +468,7 @@ function drawList() {
     const lanes = r.entries.map((e) => `
       <div class="lane">
         <div class="wk k${e.boat}">${e.boat}</div>
-        <div><span class="nm" data-reg="${e.regno || ""}" data-course="${e.boat}">${esc(e.name || "")}</span></div>
+        <div><span class="nm" data-reg="${e.regno || ""}" data-course="${e.boat}">${esc(e.name || "")}</span>${maeBadge(e.regno, e.boat)}</div>
         <div>${e.class ? `<span class="cls ${e.class}">${e.class}</span>` : ""}</div>
         ${done ? `<div class="pl ${e.place === 1 ? "p1" : ""}">${e.place ? e.place + "着" : esc(statusText(e.status))}</div>`
                : `<div class="br">${esc(e.branch || "")}</div>`}
@@ -1194,9 +1198,72 @@ function ranks(values) {
   const uniq = [...new Set(values.filter((x) => x != null && x > 0))].sort((a, b) => b - a);
   return values.map((x) => x == null || x <= 0 ? "" : x === uniq[0] ? "r1" : x === uniq[1] ? "r2" : "");
 }
+// ---------------------------------------------------------------- 前付け(直近1年・全場、data/stats/maetsuke.json)
+// 前付け = 2〜4枠は枠より内のコース、5・6枠は2つ以上内のコースに入った。
+// 5→4・6→5 は内の艇がダッシュに出た(外に出た)場合も多いので数えない
+const maeLim = (b) => (b <= 4 ? b - 1 : b - 2);
+let MAE = {};
+function maeOf(regno) {
+  const r = MAE[regno];
+  if (!r) return null;
+  const by = {};
+  let agg = 0, all = 0;
+  const dest = [0, 0, 0, 0, 0, 0, 0];
+  for (let b = 1; b <= 6; b++) {
+    const row = r.m[b] || [0, 0, 0, 0, 0, 0];
+    const n = row.reduce((a, x) => a + x, 0);
+    let k = 0;
+    if (b >= 2) for (let c = 1; c <= maeLim(b); c++) { k += row[c - 1]; dest[c] += row[c - 1]; }
+    by[b] = { n, k, p: n ? k / n : 0, row };
+    if (b >= 2) { agg += k; all += n; }
+  }
+  const strong = [2, 3, 4, 5, 6].filter((b) => by[b].n >= 3 && by[b].p >= 0.2);
+  const rate = all ? agg / all : 0;
+  if (!strong.length && rate < 0.1) return null;
+  const d = dest.indexOf(Math.max(...dest.slice(1)), 1);
+  const have = [3, 4, 5, 6].filter((b) => by[b].n >= 3);
+  const type = strong.length >= 3 && have.every((b) => strong.includes(b) || by[b].p >= 0.1) ? "どこからでも前付け"
+    : strong.length && strong.every((b) => b === 6) ? "6枠のときだけ前付け"
+    : strong.length && strong.every((b) => b >= 5) ? "外枠(5・6)のときだけ前付け"
+    : strong.length ? `${strong.join("・")}枠のとき前付け` : "ときどき前付け";
+  return { by, rate, strong, type, dest: d, n: r.n };
+}
+function maeBadge(regno, boat) {
+  const m = maeOf(regno);
+  if (!m) return "";
+  const b = m.by[boat];
+  if (boat >= 2 && b && b.n >= 3 && b.p >= 0.2) return `<span class="mae on" title="${esc(m.type)}">前付${Math.round(b.p * 100)}%</span>`;
+  return `<span class="mae" title="${esc(m.type)}">前付</span>`;
+}
+function maeCard(regno) {
+  const m = maeOf(regno), r = MAE[regno];
+  if (!r) return `<div class="card"><h2>進入(枠→コース)</h2><div class="note">直近1年で前付けはほとんどありません(枠なりで入る選手)。</div></div>`;
+  const rows = [1, 2, 3, 4, 5, 6].map((b) => {
+    const x = (m || maeOf(regno) || { by: {} }).by?.[b];
+    const row = r.m[b];
+    if (!row) return "";
+    const n = row.reduce((a, v) => a + v, 0);
+    return `<tr><td>${b}枠<br><small>${n}走</small></td>${row.map((v, ci) => {
+      const c = ci + 1, mae = b >= 2 && c <= maeLim(b);
+      return `<td class="${mae && v ? "maec" : c === b ? "own" : ""}">${n ? Math.round(v / n * 100) + "%" : "-"}</td>`;
+    }).join("")}<td><b>${x && b >= 2 ? Math.round(x.p * 100) + "%" : "-"}</b></td></tr>`;
+  }).join("");
+  return `<div class="card"><h2>進入(枠→コース)${m ? ` <span class="mae on">${esc(m.type)}</span>` : ""}</h2>
+    ${m ? `<div class="meta"><span>前付けしたときは 主に${m.dest}コースまで</span><span>2〜6枠の前付け率 ${Math.round(m.rate * 100)}%</span></div>` : ""}
+    <div class="tbl"><table class="cmp"><thead><tr><th>枠</th>${[1, 2, 3, 4, 5, 6].map((c) => `<th>${c}C</th>`).join("")}<th>前付け</th></tr></thead><tbody>${rows}</tbody></table></div>
+    <div class="note">直近1年・全場で、その枠のときに何コースから出たか。赤は前付け(2〜4枠は枠より内、5・6枠は2つ以上内)。5枠→4コース・6枠→5コースは、内の艇がダッシュに出た場合も多いので前付けに数えていません。</div></div>`;
+}
+function maeNote(race, order) {
+  const xs = race.entries.map((e) => ({ e, m: maeOf(e.regno) })).filter((x) => x.m);
+  if (!xs.length) return "";
+  return `<div class="note">${xs.map(({ e, m }) => {
+    const b = m.by[e.boat];
+    return `<span class="mini k${e.boat}">${e.boat}</span> ${esc(e.name)}: ${esc(m.type)}。${e.boat >= 2 && b.n ? `${e.boat}枠からは${Math.round(b.p * 100)}%(${b.n}走)で前付け、` : ""}主に${m.dest}コースまで`;
+  }).join("<br>")}</div>`;
+}
 function lane(e) {
   return `<td class="lk k${e.boat}">${e.boat}</td>
-    <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.boat}">${esc(e.name || "")}</span>
+    <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.boat}">${esc(e.name || "")}</span>${maeBadge(e.regno, e.boat)}
       ${e.class ? `<br><span class="cls ${e.class}">${e.class}</span>` : ""}</td>`;
 }
 const GRADE_BASE = [["all", "総合"], ["ippan", "一般戦"], ["g2g3", "G2・G3"], ["sgg1", "SG・G1"]];
@@ -1779,6 +1846,7 @@ async function drawDemeTab(v, race, keepPos) {
       <div class="slots">${slots}</div>
       <div class="note">${custom ? "手で入れ替えた進入で計算しています。" : `${baseLabel}で計算しています。`}
         入れ替えたい2つの枠を順にタップすると入れ替わります。</div>
+      ${maeNote(race, order)}
       ${custom ? '<button class="pill2" id="resetOrder" style="margin-top:8px">' + (bi?.start?.length === 6 ? "展示進入" : "枠なり") + "に戻す</button>" : ""}
     </div>
     ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race)}
@@ -2162,6 +2230,7 @@ async function openRacer(regno, course) {
         <div class="tbl"><table><thead><tr><th></th><th>平均ST</th><th>本数</th></tr></thead><tbody>${stRows}</tbody></table></div>
         <div class="note">フライング・出遅れは平均から除いています。スロー・ダッシュはコース番号(1〜3/4〜6)で分けています。</div>
       </div>
+      ${maeCard(r.regno)}
       <div class="note">出走場: ${Object.entries(r.venues).map(([k, n]) => `${esc(k)}${n}`).join("・")}</div>`;
     $("mclose").onclick = closeModal;
     $("sheet").querySelectorAll("[data-c]").forEach((b) => b.addEventListener("click", () => draw(Number(b.dataset.c))));
