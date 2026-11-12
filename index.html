@@ -27,7 +27,7 @@
 
   /* ---- 上部バー */
   .bar { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line);
-    padding: calc(10px + env(safe-area-inset-top)) 12px 10px; }
+    padding: calc(22px + env(safe-area-inset-top)) 12px 8px; }
   .bar .in { max-width: 900px; margin: 0 auto; }
   .datenav { display: flex; align-items: center; gap: 10px; }
   .datenav .pill { border-radius: 999px; padding: 8px 16px; color: var(--sub); white-space: nowrap; }
@@ -80,6 +80,15 @@
   .race .badge.wait { background: #e9ecef; color: var(--sub); }
   .hare { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
   .harerest { font-size: 12px; color: #c92a2a; font-weight: 700; }
+  .htabs { display: flex; gap: 6px; margin-top: 10px; max-width: 900px; }
+  .htabs button { flex: 1; padding: 7px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-weight: 700; font-size: 14px; color: var(--sub); }
+  .htabs button.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+  table.hres td { font-size: 13px; } table.hres td.man, .manc { color: #c92a2a; } table.hres tr[data-go] { cursor: pointer; }
+  .sokuho { color: #e8590c; font-weight: 700; } td.sub { color: var(--sub); }
+  .hotrow { display: grid; grid-template-columns: 52px 1fr; gap: 2px 8px; width: 100%; text-align: left; padding: 8px 4px; border: 0; border-bottom: 1px solid var(--line); background: none; }
+  .hotrow .ht { font-weight: 700; grid-row: span 2; align-self: center; } .hotrow .hv { font-weight: 700; }
+  .hotrow .hb { grid-column: 2; } .hotrow .hs { grid-column: 2; font-size: 12px; color: var(--sub); }
+  .hh { font-size: 14px; margin: 12px 0 4px; }
   .daylink { margin-left: auto; border: 1px solid var(--accent); color: var(--accent); background: #fff; border-radius: 14px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
   .daynav { flex-wrap: wrap; margin: 6px 0 4px; } .daynav button { line-height: 1.2; }
   .mae { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #fff0f6; color: #a61e4d; border: 1px solid #fcc2d7; vertical-align: middle; }
@@ -400,10 +409,15 @@ function drawHome() {
       <div class="label">${dateLabel(state.date)}<span class="wide">のレース</span><span class="cal">📅</span>
         <input type="date" id="pick" value="${state.date}" min="${list[0]}" max="${list[list.length - 1]}"></div>
       <button class="pill" id="next" ${next ? "" : "disabled"}>翌日 ▶</button>
-    </div>`;
+    </div>
+    <div class="htabs">${[["venue", "場一覧"], ["result", "結果一覧"], ["hot", "注目レース"]].map(([k, t]) =>
+      `<button data-h="${k}" class="${(state.htab || "venue") === k ? "on" : ""}">${t}</button>`).join("")}</div>`;
   $("prev").onclick = () => prev && loadDay(prev);
   $("next").onclick = () => next && loadDay(next);
   $("pick").onchange = (ev) => ev.target.value && loadDay(ev.target.value);
+  $("barIn").querySelectorAll("[data-h]").forEach((b) => b.onclick = () => { state.htab = b.dataset.h; drawHome(); window.scrollTo(0, 0); });
+  if (state.htab === "result") return drawHomeResults();
+  if (state.htab === "hot") return drawHomeHot();
 
   const cells = Object.entries(state.index.venues).map(([code, name]) => {
     const v = state.day?.venues[code];
@@ -423,6 +437,86 @@ function drawHome() {
   $("view-race").querySelectorAll("[data-v]").forEach((b) =>
     b.addEventListener("click", () => go("list", { venue: b.dataset.v })));
   fillHomeAre();
+}
+
+// ---------------------------------------------------------------- 場選択の「結果一覧」「注目レース」
+const hdOf = (date) => date.replace(/-/g, "");
+async function quickResult(code, r, date) {
+  // 確定した払戻があればそれ、今日で確定前なら速報(data/live/..._res.json)
+  if (r.payouts && Object.keys(r.payouts).length) return { payouts: r.payouts, kimarite: r.kimarite, fixed: true };
+  if (date !== nowJST().date || !r.deadline || r.deadline > nowJST().time) return null;
+  const x = await getLiveRaw(hdOf(date), code, `${String(r.no).padStart(2, "0")}_res`);
+  return x?.payouts ? { payouts: x.payouts, kimarite: x.kimarite, fixed: false } : null;
+}
+function payCell(p, key) {
+  const x = p?.payouts?.[key]?.[0];
+  if (!x) return "<td>-</td>";
+  return `<td class="${key === "3連単" && x.yen >= 10000 ? "man" : ""}"><b>${esc(x.combo)}</b><br>${x.yen.toLocaleString()}円${x.pop ? `<small>(${x.pop})</small>` : ""}</td>`;
+}
+async function drawHomeResults() {
+  const date = state.date;
+  const vs = Object.entries(state.index.venues).filter(([code]) => state.day?.venues[code]);
+  if (!vs.length) { $("view-race").innerHTML = '<div class="empty">この日の開催はありません。</div>'; return; }
+  $("view-race").innerHTML = vs.map(([code, name]) => `<div class="card"><h2>${esc(name)} <small style="color:var(--sub)">${dayText(state.day.venues[code])}</small></h2>
+    <div class="tbl"><table class="cmp hres"><thead><tr><th>R</th><th>3連単</th><th>2連単</th><th>決まり手</th></tr></thead>
+    <tbody id="hr_${code}"><tr><td colspan="4">読み込み中…</td></tr></tbody></table></div></div>`).join("")
+    + '<div class="note">赤は万舟(3連単1万円以上)。( )は人気。速報は確定前の結果です。レースを押すと結果タブへ。</div>';
+  for (const [code] of vs) {
+    const races = Object.values(state.day.venues[code].races).sort((a, b) => a.no - b.no);
+    const res = await Promise.all(races.map((r) => quickResult(code, r, date).catch(() => null)));
+    if (state.screen !== "home" || state.htab !== "result" || state.date !== date) return;
+    const el = $(`hr_${code}`);
+    if (!el) continue;
+    el.innerHTML = races.map((r, i) => {
+      const p = res[i];
+      if (!p) return `<tr data-go="${code}_${r.no}"><td>${r.no}R</td><td colspan="3" class="sub">締切 ${esc(r.deadline || "-")}</td></tr>`;
+      return `<tr data-go="${code}_${r.no}"><td>${r.no}R${p.fixed ? "" : '<br><small class="sokuho">速報</small>'}</td>${payCell(p, "3連単")}${payCell(p, "2連単")}<td>${esc(p.kimarite || "-")}</td></tr>`;
+    }).join("");
+    el.querySelectorAll("[data-go]").forEach((tr) => tr.onclick = () => {
+      const [v, no] = tr.dataset.go.split("_");
+      state.dtab = "result"; go("detail", { venue: v, race: Number(no) });
+    });
+  }
+}
+async function drawHomeHot() {
+  const date = state.date, now = nowJST();
+  const all = [];
+  Object.keys(state.index.venues).forEach((code) => {
+    const v = state.day?.venues[code];
+    if (v && ARE[code]) Object.values(v.races).forEach((r) => all.push({ code, r }));
+  });
+  if (!all.length) { $("view-race").innerHTML = '<div class="empty">この日の開催はありません。</div>'; return; }
+  $("view-race").innerHTML = `<div class="card"><h2>注目レース（荒れそうなレース）</h2><div id="hotList"><div class="note" id="hotProg">計算中…</div></div>
+    <div class="note">荒れ注意以上（出目確率の上位10点の合計40%未満）と、オッズ割れ（3連単1番人気12倍以上）・激アツ（蒲郡・下関で荒れ注意以上×割れ）。オッズは締切25分前から。終わったレースは結果も出します。</div></div>`;
+  const hits = [];
+  let done = 0;
+  for (const { code, r } of all) {
+    let a = null, o = null, res = null;
+    try { [a, o, res] = await Promise.all([computeDeme({ ...r, _v: code }).then((d) => areOf(d?.prob, code)), favOdds(code, r, date), quickResult(code, r, date)]); } catch (e) { /* なし */ }
+    if (state.screen !== "home" || state.htab !== "hot" || state.date !== date) return;
+    done++;
+    const h = hotOf(a, o, code);
+    if ((a && a.lvl >= 2) || h.split) hits.push({ code, r, a, o, h, res });
+    const pg = $("hotProg");
+    if (pg) pg.textContent = `計算中… ${done}/${all.length}`;
+  }
+  const over = (x) => !!x.res || (date < now.date) || (date === now.date && x.r.deadline && x.r.deadline <= now.time);
+  const up = hits.filter((x) => !over(x)).sort((p, q) => (p.r.deadline || "").localeCompare(q.r.deadline || ""));
+  const fin = hits.filter(over).sort((p, q) => (p.r.deadline || "").localeCompare(q.r.deadline || ""));
+  const row = (x) => {
+    const y = x.res?.payouts?.["3連単"]?.[0];
+    return `<button class="hotrow" data-go="${x.code}_${x.r.no}">
+      <span class="ht">${esc(x.r.deadline || "")}</span><span class="hv">${esc(state.index.venues[x.code])} ${x.r.no}R</span>
+      <span class="hb">${x.h.combo ? "" : areBadge(x.a)}${hotBadge(x.h, x.o)}</span>
+      <span class="hs">${x.a ? `上位10点 ${(x.a.s * 100).toFixed(0)}%` : ""}${y ? ` ／ <b class="${y.yen >= 10000 ? "manc" : ""}">${esc(y.combo)} ${y.yen.toLocaleString()}円</b>` : ""}</span></button>`;
+  };
+  $("hotList").innerHTML = (up.length ? `<h3 class="hh">これから</h3>${up.map(row).join("")}` : (date >= now.date ? '<div class="note">これからのレースに該当なし。</div>' : ""))
+    + (fin.length ? `<h3 class="hh">終わったレース（${fin.filter((x) => (x.res?.payouts?.["3連単"]?.[0]?.yen || 0) >= 10000).length}/${fin.length}本が万舟）</h3>${fin.map(row).join("")}` : "");
+  $("hotList").querySelectorAll("[data-go]").forEach((b) => b.onclick = () => {
+    const [v, no] = b.dataset.go.split("_");
+    state.dtab = over(hits.find((x) => `${x.code}_${x.r.no}` === b.dataset.go)) ? "result" : "deme";
+    go("detail", { venue: v, race: Number(no) });
+  });
 }
 
 // 場選択: 次のレース(締切前)が荒れ注意以上なら印。その日のあとの荒れレースも
