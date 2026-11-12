@@ -1827,11 +1827,11 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
     if (f === "setsu") return bi?.series?.racers?.[e.regno]?.setsu ?? null;  // 節間成績(小さいほど好調)
     if (f === "motor_form") return bi?.series?.motors?.[e.motor_no] ?? null;  // モーターの調子(小さいほど好調)
-    if (f === "ex_st") {  // 展示ST(Fはマイナス)
+    if (f === "ex_st") {  // 展示ST(Fは .00 扱い)
       const st = (bi?.start || []).find((x) => x.boat === b)?.st;
       if (!st || !/\d/.test(st)) return null;
       const v = parseFloat(st.replace(/[FL]/g, ""));
-      return Number.isNaN(v) ? null : st.startsWith("F") ? -v : v;
+      return Number.isNaN(v) ? null : st.startsWith("F") ? 0 : v;
     }
     if (f === "local") { const lb = model.local_branch?.[race?._v || state.venue]; return lb && e.branch ? (e.branch === lb ? 1 : 0) : null; }  // 地元の支部
     if (f === "form" || f === "form_young") {  // 直近の調子(小さいほど好調)。若手版は蒲郡以外のデビュー5年以内だけ

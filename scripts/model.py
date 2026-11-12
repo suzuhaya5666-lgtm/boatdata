@@ -383,14 +383,14 @@ _bp_cache = {}
 
 
 def st_num(st):
-    """展示STの文字列 → 数値。Fはマイナス、出遅れなどは None。"""
+    """展示STの文字列 → 数値。Fは .00 扱い(深いFほど早い扱いにしない)、出遅れなどは None。"""
     if not st or not any(ch.isdigit() for ch in st):
         return None
     try:
         v = float(st.replace("F", "").replace("L", ""))
     except ValueError:
         return None
-    return -v if st.startswith("F") else v
+    return 0.0 if st.startswith("F") else v
 
 
 def before_feats(day, code, no, boat):
