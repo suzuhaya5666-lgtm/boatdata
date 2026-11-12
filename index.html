@@ -202,7 +202,7 @@
   .mg { display: flex; } .mgd { border-left: 2px solid #868e96; padding: 0 3px; } .mgd:first-child { border-left: 0; padding-left: 0; }
   .mgs { display: flex; gap: 3px; } .mg .mr { width: 36px; min-width: 36px; } .mr.empty { border: 1px dashed #dee2e6; min-height: 70px; }
   .mgh .mgl { font-size: 12px; font-weight: 700; text-align: center; } .mgh .mgs span { width: 36px; font-size: 10px; color: var(--sub); text-align: center; font-weight: 400; }
-  .v.fst { color: #c92a2a; }
+  .v.fst { color: #c92a2a; } .fp { color: #e8590c; font-weight: 700; font-size: 13px; }
   table.grid2 td.lk, table.grid2 thead th:first-child { position: sticky; left: 0; z-index: 2; }
   table.grid2 thead th:first-child { background: #f6f8fb; }
   .oh { font-size: 15px; margin: 14px 0 4px; }
@@ -813,7 +813,11 @@ async function drawCardTab(v, race) {
         ${e.class ? `<br><span class="cls ${e.class}">${e.class}</span>` : ""}
         <br><small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}${e.weight ? ` ${e.weight}kg` : ""}</small></td>
       <td>${two(fst(stAvg[i]), col.stAvg[i], `${e.course || e.boat}コ ${fst(stCourse[i])}<small class="cnt">(${stCourseN[i]})</small>`, col.stCourse[i])}${fLine(i, e)}</td>
-      <td>${two(`<span class="${f ? "red" : ""}">F${f}</span>${files[i]?.fst ? `<br><small class="${files[i].fst.f ? "red" : "cnt"}">今期${files[i].fst.f}</small>` : ""}`, "", `<span class="${l ? "red" : ""}">L${l}</span>`, "")}</td>
+      <td>${two((() => {
+        const x = files[i]?.fst;
+        if (!x) return `<span class="${f ? "red" : ""}">F${f}</span>`;
+        return `<span class="${x.f ? "red" : ""}">F${x.f}</span>${x.fp ? `<span class="fp">(${x.fp})</span>` : ""}`;
+      })(), "", `<span class="${l ? "red" : ""}">L${l}</span>`, "")}</td>
       <td>${two(fmt(e.nat_win), col.natWin[i], `${fmt(e.nat_2, 1)}%`, col.nat2[i])}</td>
       <td>${two(fmt(e.loc_win), col.locWin[i], `${fmt(e.loc_2, 1)}%`, col.loc2[i])}</td>
       <td>${two(`<small>No.</small>${e.motor_no ?? "-"}`, "", `${fmt(e.motor_2, 1)}%`, col.motor2[i])}</td>
@@ -845,7 +849,7 @@ async function drawCardTab(v, race) {
           ${hasResult ? "<th>展示<br><small>進入</small></th><th>ST<br><small>着順</small></th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。F・Lは直近1年の回数（下の小さい数字は今の期(11〜4月・5〜10月)のF数）。平均STの赤字は、今の期にF持ちならF持ち中の平均(5本未満は想定)、前の期だけFなら「前期F 想定」。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
+      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。Fは今の期(11〜4月・5〜10月)のフライング数、( )は前の期のフライング数(F休みが未消化の可能性)。Lは直近1年の回数。平均STの赤字は、今の期にF持ちならF持ち中の平均(5本未満は想定)、前の期だけFなら「前期F 想定」。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
     </div>
 `;
   const dn = $("dayNav");
