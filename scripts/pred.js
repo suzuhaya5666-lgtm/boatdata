@@ -75,15 +75,22 @@ function ana12(tri, o3) {
 }
 
 // 2連単1位の目を頭・2着に固定した3連単。3着は確率の低い艇を切る
-//   cut1: 1艇切(3点) / cut20: 3着になる確率の合計が20%を超えない所まで下から削る
-function ex3(tri, exs, o3) {
+//   cut1: 1艇切(3点) / cut10・cut15・cut20: 3着になる確率の合計がその%を超えない所まで下から削る
+//   o2: その2連単のオッズ。syn: 各買い目の3連単の合成オッズ(オッズがある時だけ)。
+//   切替 = o2 > syn なら同じ金額で2連単1点、そうでなければ3連単
+function ex3(tri, exs, o3, o2s) {
   const [top, pt] = exs[0];
   const rest = tri.filter((t) => t.k.startsWith(top + "-")).sort((a, b) => b.p - a.p);
   const r4 = (x) => Math.round(x * 10000) / 10000;
   const one = (t) => ({ k: t.k, p: r4(t.p), o: o3[t.k] || null });
-  const c20 = [...rest]; let cut = 0;
-  while (c20.length > 1 && cut + c20[c20.length - 1].p / pt <= 0.2 + 1e-12) { cut += c20[c20.length - 1].p / pt; c20.pop(); }
-  return { k: top, p: r4(pt), cut1: rest.slice(0, 3).map(one), cut20: c20.map(one) };
+  const cutTo = (x) => { const c = [...rest]; let cut = 0;
+    while (c.length > 1 && cut + c[c.length - 1].p / pt <= x + 1e-12) { cut += c[c.length - 1].p / pt; c.pop(); }
+    return c; };
+  const syn = (ks) => (ks.every((t) => o3[t.k] > 0) ? Math.round(100 / ks.reduce((s, t) => s + 1 / o3[t.k], 0)) / 100 : null);
+  const sets = { cut1: rest.slice(0, 3), cut10: cutTo(0.1), cut15: cutTo(0.15), cut20: cutTo(0.2) };
+  const out = { k: top, p: r4(pt), o2: o2s[top] || null };
+  for (const [n, ks] of Object.entries(sets)) { out[n] = ks.map(one); out[n + "_syn"] = syn(ks); }
+  return out;
 }
 
 function predict(code, race, bi, od) {
@@ -115,7 +122,7 @@ function predict(code, race, bi, od) {
     ex: hasOdds ? exs.slice(0, 3).filter(([k, p]) => o2[k] && p * o2[k] >= 1.2).sort((x, y) => y[1] * o2[y[0]] - x[1] * o2[x[0]]).slice(0, 1).map(([k, p]) => ({ k, p: r4(p), o: o2[k] })) : null,
     ana: hasOdds ? tri.filter((t) => (o3[t.k] || 0) >= 100 && t.p * o3[t.k] >= 1.5).sort((x, y) => y.p * o3[y.k] - x.p * o3[x.k]).slice(0, 5).map(one) : null,
     ana12: hasOdds ? ana12(tri, o3) : null,
-    ex3: ex3(tri, exs, o3),
+    ex3: ex3(tri, exs, o3, o2),
   };
 }
 
