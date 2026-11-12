@@ -27,6 +27,12 @@ jobs:
         with:
           python-version: "3.12"
 
+      # 展示後の予想(pred.js)が data/stats/venues.json を使う。stats は .gitignore なのでここで作る
+      - name: 成績の集計
+        run: |
+          pip install --quiet numpy
+          python scripts/stats.py
+
       - name: 直前情報の取得(5分ごと)
         run: |
           git config user.name "github-actions[bot]"
