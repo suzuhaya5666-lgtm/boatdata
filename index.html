@@ -1765,6 +1765,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
       const v = parseFloat(st.replace(/[FL]/g, ""));
       return Number.isNaN(v) ? null : st.startsWith("F") ? -v : v;
     }
+    if (f === "local") { const lb = model.local_branch?.[race?._v || state.venue]; return lb && e.branch ? (e.branch === lb ? 1 : 0) : null; }  // 地元の支部
     if (f === "parts") return bi?.entries?.[b] ? (bi.entries[b].parts?.length ? 1 : 0) : null;
     if (f === "tilt") return bi?.entries?.[b]?.tilt ?? null;
     if (f === "class") return CLS_NUM[e.class] ?? null;

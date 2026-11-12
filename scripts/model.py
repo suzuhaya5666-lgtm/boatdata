@@ -29,17 +29,18 @@ M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走�
 WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
 FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu",
-            "ex_st", "parts", "tilt", "motor_form"]
+            "ex_st", "parts", "tilt", "motor_form", "local"]
 FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績",
-                 "展示ST", "部品交換", "チルト", "モーターの調子"]
+                 "展示ST", "部品交換", "チルト", "モーターの調子", "地元"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
-GROUPS = [[0, 11, 12, 13], [1], [2], [3], [4], [5], [6], [7, 8, 9], [10, 14]]
-GROUP_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・モーターの調子"]
+GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4], [5], [6], [7, 8, 9], [10, 14]]
+GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・モーターの調子"]
 ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、今は蒲郡のみ)。コースの平均を引いて、速いほど大きくして使う
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
 SETSU_K = 6      # 節間成績: 走数が少ないときに0(平均)へ寄せる強さ。値 = 平均 × n/(n+6)
 SETSU_CM = {}    # 場×コースの平均着順(予想がないレースの節間成績に使う。画面にも渡す)
 ROWMETA = []     # 学習に使う各レース: (場, 日, R, {コース: 登番}, {コース: モーター番号})
+LOCAL_BRANCH = {"07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "19": "山口"}  # 地元の支部
 MOTOR_DAYS, MOTOR_K = 90, 12   # モーターの調子: 直近90日のその場での(着順 − 予想の着順)の平均を走数で寄せる
 RESULTS = []     # 5場の全レースの着順: (場, 登番, 日, R, コース, 着順, モーター番号)
 
@@ -165,7 +166,8 @@ def build():
                             b["motor_2"] if b.get("motor_2") is not None else np.nan,
                             CLS.get(b.get("class"), np.nan), adj, fc] + \
                         [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")] + \
-                        [setsu_value(srec, code, e["regno"], day)] + before_feats(day, code, race["no"], e["boat"]) + [np.nan]
+                        [setsu_value(srec, code, e["regno"], day)] + before_feats(day, code, race["no"], e["boat"]) + [np.nan] + \
+                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
                 ROWMETA.append((code, day, int(race["no"]), {k: courses[k]["regno"] for k in range(1, 7)},
                                 {k: courses[k].get("motor_no") for k in range(1, 7)}))
@@ -672,7 +674,7 @@ def main():
                    "W": np.round(W, 4).tolist(),
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
                    "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
-                   "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect", "motor_days": MOTOR_DAYS, "motor_k": MOTOR_K,
+                   "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect", "motor_days": MOTOR_DAYS, "motor_k": MOTOR_K, "local_branch": LOCAL_BRANCH,
                    "setsu_base_mask": (1 << (len(GROUPS) + 1)) - 1 - (1 << len(GROUPS) - 1),
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
