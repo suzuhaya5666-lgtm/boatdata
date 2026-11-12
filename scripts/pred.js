@@ -35,6 +35,45 @@ const nowD = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
 const now = nowD.slice(11, 16), today = nowD.slice(0, 10);
 const SPLIT = 12;
 
+// 穴12点: 決まった形(12点)ごとに、期待値(確率×オッズの合計)が最大になる艇を選ぶ。
+//   A 1-4-4: X-ABCD-ABCD / B 1-3-5: X-ABC-残り全部 / C 2-3-5: XY-XYZ-(1艇除く5艇)
+//   D 2-4-4: XY-XYZW-XYZW / E 3艇ボックス×2 。best はその中で期待値が最大の形
+function ana12(tri, o3) {
+  const B = ["1", "2", "3", "4", "5", "6"];
+  const P = Object.fromEntries(tri.map((t) => [t.k, t.p]));
+  const comb = (a, n) => (n === 0 ? [[]] : a.flatMap((x, i) => comb(a.slice(i + 1), n - 1).map((r) => [x, ...r])));
+  const perm = (h, s2, s3) => h.flatMap((a) => s2.flatMap((b) => s3.filter((c) => a !== b && b !== c && a !== c).map((c) => `${a}-${b}-${c}`)))
+    .filter((k) => new Set(k.split("-")).size === 3);
+  const sh = { A: [], B: [], C: [], D: [], E: [] };
+  for (const h of B) {
+    const o = B.filter((x) => x !== h);
+    comb(o, 4).forEach((s) => sh.A.push({ f: `${h}-${s.join("")}-${s.join("")}`, k: perm([h], s, s) }));
+    comb(o, 3).forEach((s) => sh.B.push({ f: `${h}-${s.join("")}-${o.join("")}`, k: perm([h], s, o) }));
+  }
+  for (const hh of comb(B, 2)) {
+    const o = B.filter((x) => !hh.includes(x));
+    for (const c of o) for (const ex of o) if (ex !== c) {
+      const s3 = B.filter((x) => x !== ex);
+      sh.C.push({ f: `${hh.join("")}-${[...hh, c].sort().join("")}-${s3.join("")}`, k: perm(hh, [...hh, c], s3) });
+    }
+    comb(o, 2).forEach((s) => { const g = [...hh, ...s].sort(); sh.D.push({ f: `${hh.join("")}-${g.join("")}-${g.join("")}`, k: perm(hh, g, g) }); });
+  }
+  const t3 = comb(B, 3);
+  for (let i = 0; i < t3.length; i++) for (let j = i + 1; j < t3.length; j++)
+    sh.E.push({ f: `BOX${t3[i].join("")}+BOX${t3[j].join("")}`, k: [...perm(t3[i], t3[i], t3[i]), ...perm(t3[j], t3[j], t3[j])] });
+  const r4 = (x) => Math.round(x * 10000) / 10000;
+  const out = {};
+  let best = null;
+  for (const [name, cands] of Object.entries(sh)) {
+    let top = null, tv = -1;
+    for (const c of cands) { const v = c.k.reduce((s, k) => s + (P[k] || 0) * (o3[k] || 0), 0); if (v > tv) { tv = v; top = c; } }
+    out[name] = { f: top.f, k: top.k, ev: r4(tv / 12), p: r4(top.k.reduce((s, k) => s + (P[k] || 0), 0)) };
+    if (!best || out[name].ev > out[best].ev) best = name;
+  }
+  out.best = best;
+  return out;
+}
+
 function predict(code, race, bi, od) {
   const racers = Object.fromEntries(race.entries.map((e) => [e.boat, J(`data/stats/racers/${e.regno}.json`)]));
   const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
@@ -63,6 +102,7 @@ function predict(code, race, bi, od) {
     bal: hasOdds ? tri.slice(0, 10).filter((t) => o3[t.k] && t.p * o3[t.k] >= 1).sort((x, y) => y.p * o3[y.k] - x.p * o3[x.k]).slice(0, 5).map(one) : null,
     ex: hasOdds ? exs.slice(0, 3).filter(([k, p]) => o2[k] && p * o2[k] >= 1.2).sort((x, y) => y[1] * o2[y[0]] - x[1] * o2[x[0]]).slice(0, 1).map(([k, p]) => ({ k, p: r4(p), o: o2[k] })) : null,
     ana: hasOdds ? tri.filter((t) => (o3[t.k] || 0) >= 100 && t.p * o3[t.k] >= 1.5).sort((x, y) => y.p * o3[y.k] - x.p * o3[x.k]).slice(0, 5).map(one) : null,
+    ana12: hasOdds ? ana12(tri, o3) : null,
   };
 }
 
