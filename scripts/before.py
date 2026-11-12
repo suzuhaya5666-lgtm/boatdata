@@ -252,6 +252,12 @@ def fetch_once():
         fetch_live_results(day, now)
     except Exception as e:
         print(f"結果(速報)失敗 {e}")
+    try:  # 振り返り用の予想(蒲郡): 展示前と展示後を data/pred に残す
+        r = subprocess.run(["node", os.path.join(os.path.dirname(__file__), "pred.js"), today.strftime("%Y%m%d"), "07"],
+                           capture_output=True, text=True, timeout=120)
+        print((r.stdout or "").strip() or (r.stderr or "").strip()[-300:])
+    except Exception as e:
+        print(f"予想の保存失敗 {e}")
     return got, remaining
 
 
@@ -259,7 +265,7 @@ def push():
     """取れた分をすぐ GitHub に保存する(画面はリポジトリから直接読む)。"""
     def run(*a):
         return subprocess.run(list(a), capture_output=True, text=True)
-    paths = [p for p in (os.path.join(DATA, "before"), os.path.join(DATA, "live")) if os.path.exists(p)]
+    paths = [p for p in (os.path.join(DATA, "before"), os.path.join(DATA, "live"), os.path.join(DATA, "pred")) if os.path.exists(p)]
     if not paths:
         return
     run("git", "add", *paths)
