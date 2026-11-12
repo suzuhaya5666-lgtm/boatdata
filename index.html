@@ -89,6 +89,9 @@
   .hotrow .ht { font-weight: 700; grid-row: span 2; align-self: center; } .hotrow .hv { font-weight: 700; }
   .hotrow .hb { grid-column: 2; } .hotrow .hs { grid-column: 2; font-size: 12px; color: var(--sub); }
   .hh { font-size: 14px; margin: 12px 0 4px; }
+  .note.nfold { display: none !important; }
+  .nbtn { position: absolute; top: 10px; right: 10px; border: 1px solid var(--line); background: #fff; color: var(--sub); border-radius: 12px; font-size: 12px; padding: 2px 8px; z-index: 1; }
+  .card > h2 { padding-right: 70px; }
   .daylink { margin-left: auto; border: 1px solid var(--accent); color: var(--accent); background: #fff; border-radius: 14px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
   .daynav { flex-wrap: wrap; margin: 6px 0 4px; } .daynav button { line-height: 1.2; }
   .mae { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #fff0f6; color: #a61e4d; border: 1px solid #fcc2d7; vertical-align: middle; }
@@ -503,7 +506,7 @@ async function drawHomeHot() {
     if (v && ARE[code]) Object.values(v.races).forEach((r) => all.push({ code, r }));
   });
   if (!all.length) { $("view-race").innerHTML = '<div class="empty">この日の開催はありません。</div>'; return; }
-  $("view-race").innerHTML = `<div class="card"><h2>注目レース（荒れそうなレース）</h2><div id="hotList"><div class="note" id="hotProg">計算中…</div></div>
+  $("view-race").innerHTML = `<div class="card"><h2>注目レース（荒れそうなレース）</h2><div id="hotList"><div class="note keep" id="hotProg">計算中…</div></div>
     <div class="note">荒れ注意以上（出目確率の上位10点の合計40%未満）と、オッズ割れ（3連単1番人気12倍以上）・激アツ（蒲郡・下関で荒れ注意以上×割れ）。オッズは締切25分前から。終わったレースは結果も出します。</div></div>`;
   const hits = [];
   let done = 0;
@@ -527,7 +530,7 @@ async function drawHomeHot() {
       <span class="hb">${x.h.combo ? "" : areBadge(x.a)}${hotBadge(x.h, x.o)}</span>
       <span class="hs">${x.a ? `上位10点 ${(x.a.s * 100).toFixed(0)}%` : ""}${y ? ` ／ <b class="${y.yen >= 10000 ? "manc" : ""}">${esc(y.combo)} ${y.yen.toLocaleString()}円</b>` : ""}</span></button>`;
   };
-  $("hotList").innerHTML = (up.length ? `<h3 class="hh">これから</h3>${up.map(row).join("")}` : (date >= now.date ? '<div class="note">これからのレースに該当なし。</div>' : ""))
+  $("hotList").innerHTML = (up.length ? `<h3 class="hh">これから</h3>${up.map(row).join("")}` : (date >= now.date ? '<div class="note keep">これからのレースに該当なし。</div>' : ""))
     + (fin.length ? `<h3 class="hh">終わったレース（${fin.filter((x) => (x.res?.payouts?.["3連単"]?.[0]?.yen || 0) >= 10000).length}/${fin.length}本が万舟）</h3>${fin.map(row).join("")}` : "");
   $("hotList").querySelectorAll("[data-go]").forEach((b) => b.onclick = () => {
     const [v, no] = b.dataset.go.split("_");
@@ -601,6 +604,36 @@ function drawList() {
     b.addEventListener("click", () => go("detail", { race: Number(b.dataset.r) })));
   fillAre(races);
 }
+
+// ---------------------------------------------------------------- 説明文はたたんでおき、カードの「説明」ボタンで開く
+// .note はすべて説明扱い。状態やデータを表すものは .keep を付けて常に出す。解析ノートの中はそのまま
+function foldNotes(root) {
+  root.querySelectorAll(".card").forEach((card) => {
+    if (card.closest("#view-notes")) return;
+    const isEx = (n) => !n.classList.contains("keep") && !n.closest("summary, details");
+    const ns = [...card.querySelectorAll(".note")].filter(isEx);
+    const btn = card.querySelector(":scope > .nbtn");
+    if (!ns.length) { if (btn) btn.remove(); return; }
+    const open = card.dataset.nopen === "1";
+    ns.forEach((n) => n.classList.toggle("nfold", !open));
+    if (btn) return;
+    const b = document.createElement("button");
+    b.className = "nbtn"; b.type = "button"; b.textContent = "ⓘ 説明";
+    b.onclick = () => {
+      const o = card.dataset.nopen !== "1"; card.dataset.nopen = o ? "1" : "";
+      card.querySelectorAll(".note").forEach((n) => { if (isEx(n)) n.classList.toggle("nfold", !o); });
+      b.textContent = o ? "ⓘ 閉じる" : "ⓘ 説明";
+    };
+    card.style.position = "relative";
+    card.prepend(b);
+  });
+}
+let _foldQ = false;
+new MutationObserver(() => {
+  if (_foldQ) return;
+  _foldQ = true;
+  requestAnimationFrame(() => { _foldQ = false; foldNotes(document); });
+}).observe(document.body, { childList: true, subtree: true });
 
 // ---------------------------------------------------------------- 荒れレースアラート(蒲郡)
 // 出目確率の上位10点の合計で段階分け。数字は今の出目確率で、学習に使っていない直近約1年(2025/9〜2026/11)の各場約2,000レースでの実績
@@ -942,10 +975,10 @@ async function toggleDayNav(v) {
   if (!box) return;
   if (!box.hidden) { box.hidden = true; return; }
   box.hidden = false;
-  box.innerHTML = '<div class="note">読み込み中…</div>';
+  box.innerHTML = '<div class="note keep">読み込み中…</div>';
   const days = await meetDays(v);
   const label = (x) => x.v.final ? "最終日" : x.v.day === 1 ? "初日" : x.v.day ? `${x.v.day}日目` : "";
-  box.innerHTML = `<div class="note">${esc(v.title || "")}</div><div class="seg daynav">${days.map((x) =>
+  box.innerHTML = `<div class="note keep">${esc(v.title || "")}</div><div class="seg daynav">${days.map((x) =>
     `<button data-date="${x.date}" class="${x.date === state.date ? "on" : ""}">${label(x)}<br><small>${x.date.slice(5).replace("-", "/")}</small></button>`).join("")}</div>`;
   box.querySelectorAll("[data-date]").forEach((b) => b.onclick = () => { if (b.dataset.date !== state.date) loadDay(b.dataset.date); });
 }
@@ -1087,7 +1120,7 @@ async function drawResultTab(v, race) {
   // オッズ表
   const bb = (b) => `<span class="mini k${b}">${b}</span>`;
   const oc = (val, hit) => `<td class="${hit ? "hitc" : ""}">${val == null ? "-" : val.toFixed(1)}</td>`;
-  let oddsHtml = '<div class="note">このレースのオッズはまだ取り込んでいません（結果のあとに取り込みます）。</div>';
+  let oddsHtml = '<div class="note keep">このレースのオッズはまだ取り込んでいません（結果のあとに取り込みます）。</div>';
   if (od) {
     const B = [1, 2, 3, 4, 5, 6];
     const t2 = `<table class="grid2 odds"><thead><tr><th>2着＼1着</th>${B.map((a) => `<th>${bb(a)}</th>`).join("")}</tr></thead><tbody>
@@ -1404,7 +1437,7 @@ function openMemo(v, race, od) {
         <span><input id="mtotal" class="amt" type="number" min="0" value="${Math.max(total / 100, list.length)}"><small>00円</small></span>
         <button class="pill2 on" id="mapply">変更</button>
       </div>
-      <div class="note">合計 ${total.toLocaleString()}円・${list.length}点。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。目安オッズの合成は、出目確率から見た「これだけつけば五分」の倍率で、合成オッズの方が大きければ（緑）確率のわりに割に合う買い方です。</div>
+      <div class="note keep">合計 ${total.toLocaleString()}円・${list.length}点。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。目安オッズの合成は、出目確率から見た「これだけつけば五分」の倍率で、合成オッズの方が大きければ（緑）確率のわりに割に合う買い方です。</div>
     </div>
     ${warnBox}
     <div class="orow"><div class="seg"><button class="pill2 ${state.memoSort === "boat" ? "on" : ""}" data-ms="boat">枠番順</button><button class="pill2 ${state.memoSort === "odds" ? "on" : ""}" data-ms="odds">オッズ順</button></div>
@@ -1522,7 +1555,7 @@ function maeBadge(regno, boat) {
 }
 function maeCard(regno) {
   const m = maeOf(regno), r = MAE[regno];
-  if (!r) return `<div class="card"><h2>進入(枠→コース)</h2><div class="note">直近1年で前付けはほとんどありません(枠なりで入る選手)。</div></div>`;
+  if (!r) return `<div class="card"><h2>進入(枠→コース)</h2><div class="note keep">直近1年で前付けはほとんどありません(枠なりで入る選手)。</div></div>`;
   const rows = [1, 2, 3, 4, 5, 6].map((b) => {
     const x = (m || maeOf(regno) || { by: {} }).by?.[b];
     const row = r.m[b];
@@ -1542,7 +1575,7 @@ function maeNote(race, order) {
   const xs = race.entries.map((e) => ({ e, m: maeOf(e.regno) }))
     .filter((x) => x.m && x.e.boat >= 2 && x.m.by[x.e.boat].n >= 3 && x.m.by[x.e.boat].p >= 0.2);
   if (!xs.length) return "";
-  return `<div class="note">${xs.map(({ e, m }) => {
+  return `<div class="note keep">${xs.map(({ e, m }) => {
     const b = m.by[e.boat];
     return `<span class="mini k${e.boat}">${e.boat}</span> ${esc(e.name)}: ${esc(m.type)}。${e.boat >= 2 && b.n ? `${e.boat}枠からは${Math.round(b.p * 100)}%(${b.n}走)で前付け、` : ""}主に${m.dest}コースまで`;
   }).join("<br>")}</div>`;
@@ -1641,7 +1674,7 @@ async function drawRacerTab(v, race) {
         <tbody><tr>${lane(race.entries[i1])}<td>${pc(k1[0])}${lvTag(lv(k1[0], KT.sasare))}</td><td>${pc(k1[1])}${lvTag(lv(k1[1], KT.makurare))}</td><td>${pc(k1[2])}${lvTag(lv(k1[2], KT.mzare))}</td></tr></tbody></table></div>
       <div class="tbl"><table class="cmp"><thead><tr><th>枠</th><th>選手</th><th>差し</th><th>まくり</th><th>まくり差し</th></tr></thead>
         <tbody>${race.entries.filter((e) => e.boat >= 2).map((e) => { const r = kr(e.boat); return `<tr>${lane(e)}<td>${pc(r?.[0])}${e.boat === 2 ? lvTag(lv(r?.[0], KT.sashi)) : ""}</td><td>${pc(r?.[1])}${[3, 4].includes(e.boat) ? lvTag(lv(r?.[1], KT.makuri)) : ""}</td><td>${pc(r?.[2])}${[3, 4].includes(e.boat) ? lvTag(lv(r?.[2], KT.mz)) : ""}</td></tr>`; }).join("")}</tbody></table></div>
-      <div style="margin-top:8px">${combos.map((c) => `<div class="note" style="${c.hit ? "color:#e03131;font-weight:700" : "color:#adb5bd"}">${c.hit ? "● 該当" : "○ 該当しない"}：${c.name}${c.hit ? `<br><span style="font-weight:400;color:var(--ink)">${c.note}</span>` : ""}</div>`).join("")}</div>
+      <div style="margin-top:8px">${combos.map((c) => `<div class="note keep" style="${c.hit ? "color:#e03131;font-weight:700" : "color:#adb5bd"}">${c.hit ? "● 該当" : "○ 該当しない"}：${c.name}${c.hit ? `<br><span style="font-weight:400;color:var(--ink)">${c.note}</span>` : ""}</div>`).join("")}</div>
       <div class="note">全場・3年分で、1号艇は1コースのとき、2〜6号艇はその枠と同じコースのときの率です。走った回数が少ない選手は、全体の率に20走分寄せています。低・中・高は、5場のレース全体を3等分した目安です。出目確率にはまだ入れていません（検証中）。</div>
     </div>` : "";
 
@@ -2193,6 +2226,7 @@ async function drawDemeTab(v, race, keepPos) {
     `<button class="slot ${state.pick === c ? "on" : ""}" data-slot="${c}"><small>${c}コース</small>${bb(boatOf(c))}</button>`).join("");
 
   $("view-race").innerHTML = `
+    ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race, bi?.weather)}
     <div class="card">
       <h2>進入</h2>
       <div class="slots">${slots}</div>
@@ -2201,10 +2235,16 @@ async function drawDemeTab(v, race, keepPos) {
       ${maeNote(race, order)}
       ${custom ? '<button class="pill2" id="resetOrder" style="margin-top:8px">' + (bi?.start?.length === 6 ? "展示進入" : "枠なり") + "に戻す</button>" : ""}
     </div>
-    ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race, bi?.weather)}
-    ${kimCardHtml(kimPredict(kimModel, model, adj.Z, order, racers), v.name)}
     ${featCard(model, adj)}
+    <div class="card">
+      <h2>各艇の着順確率</h2>
+      <div class="meta"><span>${hasExh ? "展示タイム込み" : adj.used.includes("節間平均の展示・オリ展") ? "展示前（節間平均の展示・オリ展で補正）" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
+      <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th><th>3連対</th></tr></thead>
+        <tbody>${rows}</tbody></table></div>
+    </div>
+    ${kimCardHtml(kimPredict(kimModel, model, adj.Z, order, racers), v.name)}
     ${buffCard(adj, order)}
+    ${nige2Card()}
     <div class="card">
       <h2>頭固定</h2>
       <div class="slots">${[1, 2, 3, 4, 5, 6].map((b) => `<button class="slot headbtn ${head === b ? "on" : ""}" data-head="${b}"><small>${head === b ? "1着" : "&nbsp;"}</small>${bb(b)}</button>`).join("")}</div>
@@ -2213,16 +2253,9 @@ async function drawDemeTab(v, race, keepPos) {
       <div class="slots">${[1, 2, 3, 4, 5, 6].map((b) => `<button class="slot cutbtn ${cut.has(b) ? "on" : ""}" data-cut="${b}"><small>${cut.has(b) ? "切り" : "&nbsp;"}</small>${bb(b)}</button>`).join("")}</div>
       <div class="note">${cut.size ? `${[...cut].sort().map(bb).join("・")} が3着以内に来ない前提で、残りの組み合わせだけで確率を出し直しています。`
         : "3着以内に来ないと思う艇をタップすると、その艇を除いた確率に出し直します（3艇まで）。"}</div>
-      ${cut.size || head ? `<div class="note">この前提（${[head ? `${bb(head)}が1着` : "", cut.size ? `${[...cut].sort().map(bb).join("・")}が3着以内に来ない` : ""].filter(Boolean).join("、")}）になる確率は <b>${(keep * 100).toFixed(1)}%</b>。</div>
+      ${cut.size || head ? `<div class="note keep">この前提（${[head ? `${bb(head)}が1着` : "", cut.size ? `${[...cut].sort().map(bb).join("・")}が3着以内に来ない` : ""].filter(Boolean).join("、")}）になる確率は <b>${(keep * 100).toFixed(1)}%</b>。</div>
         <button class="pill2" id="resetCut" style="margin-top:8px">頭固定・切りをすべて解除</button>` : ""}
     </div>
-    <div class="card">
-      <h2>各艇の着順確率</h2>
-      <div class="meta"><span>${hasExh ? "展示タイム込み" : adj.used.includes("節間平均の展示・オリ展") ? "展示前（節間平均の展示・オリ展で補正）" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
-      <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th><th>3連対</th></tr></thead>
-        <tbody>${rows}</tbody></table></div>
-    </div>
-    ${nige2Card()}
     <div class="card">
       <h2>3連単ランキング</h2>
       <div class="pills">${[["all", "総合"], ["nige", "逃げ"], ["other", "逃げ以外"]].map(([k, l]) => `<button class="pill2 ${mode === k ? "on" : ""}" data-trimode="${k}">${l}</button>`).join("")}</div>
@@ -2286,6 +2319,8 @@ async function drawDemeTab(v, race, keepPos) {
     drawDemeTab(v, race, true);
   });
   $("view-race").querySelectorAll("[data-buffj]").forEach((b) => b.onclick = () => { state.buffJ = Number(b.dataset.buffj); drawDemeTab(v, race, true); });
+  const ba = $("buffAll");
+  if (ba) ba.onclick = () => { state.buffAll = !state.buffAll; drawDemeTab(v, race, true); };
   $("view-race").querySelectorAll("[data-buff]").forEach((b) => b.onclick = () => openBuff(adj, order, ents, Number(b.dataset.buff)));
   $("view-race").querySelectorAll("[data-trimode]").forEach((b) => b.onclick = () => {
     state.triMode = b.dataset.trimode; state.triN = 20; drawDemeTab(v, race, true);
@@ -2329,11 +2364,12 @@ function buffCard(adj, order) {
     <div class="pills">${["1着", "2着", "3着"].map((l, i) => `<button class="pill2 ${j === i ? "on" : ""}" data-buffj="${i}">${l}</button>`).join("")}</div>
     <div class="tbl"><table class="buff"><thead><tr><th></th>${B.map((b) => `<th>${bb(b)}<br><small>${cOf[b]}コース</small></th>`).join("")}</tr></thead><tbody>
       ${row("差し引き", (b) => sum(b, () => true), true)}
-      ${row("＋の合計", (b) => sum(b, (x) => x > 0))}
+      ${state.buffAll ? `${row("＋の合計", (b) => sum(b, (x) => x > 0))}
       ${row("−の合計", (b) => sum(b, (x) => x < 0))}
       <tr class="bsep"><td colspan="7"></td></tr>
-      ${idx.map((n) => row(esc(adj.items[n].name), (b) => v(b, n))).join("")}
+      ${idx.map((n) => row(esc(adj.items[n].name), (b) => v(b, n))).join("")}` : ""}
     </tbody></table></div>
+    <button class="pill2" id="buffAll" style="margin-top:8px">${state.buffAll ? "詳細を閉じる" : "詳細を見る（材料ごと）"}</button>
     <div class="note">材料（展示・勝率・モーターなど）ごとに、その艇の${j + 1}着になる強さを何%上げ下げしたか。レース内の6艇の平均と比べた差に係数を掛けたもので、コース別成績とコース補正は含みません。数字をタップすると、その艇の内訳（元の値と1〜3着それぞれの効き）を出します。</div></div>`;
 }
 function openBuff(adj, order, ents, b) {
@@ -2641,7 +2677,7 @@ async function openRacer(regno, course) {
         <div class="note">フライング・出遅れは平均から除いています。スロー・ダッシュはコース番号(1〜3/4〜6)で分けています。</div>
       </div>
       ${maeCard(r.regno)}
-      <div class="note">出走場: ${Object.entries(r.venues).map(([k, n]) => `${esc(k)}${n}`).join("・")}</div>`;
+      <div class="note keep">出走場: ${Object.entries(r.venues).map(([k, n]) => `${esc(k)}${n}`).join("・")}</div>`;
     $("mclose").onclick = closeModal;
     $("sheet").querySelectorAll("[data-c]").forEach((b) => b.addEventListener("click", () => draw(Number(b.dataset.c))));
     $("sg").querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; draw(c); });
