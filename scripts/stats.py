@@ -396,6 +396,8 @@ def main():
                         for rs in [[r for r in recs1y if in_cat(cat, r[7])]] if rs},
               "bycourse": bycourse(recs, last),
               "fst": f_state(recs, dt.datetime.now(JST).date()),
+              # 5場それぞれを最後に走った日(初日の想定STの「久しぶりか」に使う)
+              "lastv": {c: max(r[0] for r in recs if r[1] == c).isoformat() for c in ("07", "08", "11", "12", "19") if any(r[1] == c for r in recs)},
               "kim": {"c1": {"n": kc[regno][0][0], "rate": shrink(kc[regno][0], g1)},
                       **{str(k): {"n": kc[regno][1][k][0], "rate": shrink(kc[regno][1][k], gk[k])} for k in range(2, 7)}}}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:

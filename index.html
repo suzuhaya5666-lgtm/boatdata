@@ -799,20 +799,50 @@ async function drawCardTab(v, race) {
   const PREVF = { 1: [0.006, 0.003, 0], 2: [0.019, 0.013, 0.008] };
   const [, pm] = state.date.split("-").map(Number);
   const mi = pm >= 11 ? pm - 11 : pm <= 4 ? pm + 1 : pm - 5;  // 期(11〜4月・5〜10月)の何か月目(0〜5)
-  const fLine = (i, e) => {
-    const fs = files[i]?.fst, c = String(e.course || e.boat);
-    if (fs && !fs.f && fs.fp) {
-      const add = PREVF[Math.min(fs.fp, 2)][Math.min(2, Math.floor(mi / 2))];
-      const base = fs.st?.[c]?.n?.[0] ?? stCourse[i] ?? stAvg[i];
-      return add && base != null ? `<div class="v sub fst">前期F 想定 ${fst(base + add)}</div>` : `<div class="v sub fst">前期F${fs.fp}</div>`;
+  // 初日・2日目とF持ちの想定ST = ふだんのコース別平均 + F持ちの遅れ + 日程・条件・気象の遅れ(data/model/stdelay.json)
+  const sd = await cached("data/model/stdelay.json").catch(() => null);
+  const bi = await getBefore(state.date.replace(/-/g, ""), state.venue, race.no).catch(() => null);
+  const LOCALB = { "07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "19": "山口" };
+  const bin = (x, th) => th.filter((t) => x > t).length;
+  const slotOf = (e) => {
+    if (v.day === 1) {
+      const before = Object.values(v.races).filter((r) => r.no < race.no && r.entries.some((x) => x.regno === e.regno)).length;
+      return before ? "s2" : "s1";
     }
-    if (!fs?.f) return "";
-    const k = fs.f >= 2 ? "f2" : "f1", d = fs.st?.[c] || {};
-    if (d[k] && d[k][1] >= 5) return `<div class="v sub fst">F持ち ${fst(d[k][0])}<small class="cnt">(${d[k][1]})</small></div>`;
+    return v.day === 2 ? "s3" : "s4";
+  };
+  const SLOTNAME = { s1: "初日", s2: "初日2走目", s3: "2日目", s4: "" };
+  const stLine = (i, e) => {
+    const fs = files[i]?.fst, c = String(e.course || e.boat);
+    const fc = fs?.f || 0, slot = slotOf(e);
+    const d = fs?.st?.[c] || {};
+    // F持ちで、F持ち中の実績が5本以上 → 実績(3日目以降)
+    if (fc && slot === "s4") {
+      const k = fc >= 2 ? "f2" : "f1";
+      if (d[k] && d[k][1] >= 5) return `<div class="v sub fst">F持ち ${fst(d[k][0])}<small class="cnt">(${d[k][1]})</small></div>`;
+    }
+    const prevF = !fc && fs?.fp ? PREVF[Math.min(fs.fp, 2)][Math.min(2, Math.floor(mi / 2))] : 0;
+    if (slot === "s4" && !fc && !prevF) return "";
     const base = d.n?.[0] ?? stCourse[i] ?? stAvg[i];
-    const dl = fd?.[k]?.[c] ?? fd?.[k]?.["0"];
-    if (base == null || dl == null) return "";
-    return `<div class="v sub fst">想定 ${fst(base + dl)}<small class="cnt">${d[k] ? `(${d[k][1]})` : ""}</small></div>`;
+    if (base == null) return "";
+    const fadd = fc ? (fd?.[fc >= 2 ? "f2" : "f1"]?.[c] ?? fd?.[fc >= 2 ? "f2" : "f1"]?.["0"] ?? 0) : 0;
+    let delay = 0;
+    const m = sd?.slots?.[slot];
+    if (m) {
+      const w = bi?.weather || {};
+      const lv = files[i]?.lastv?.[state.venue];
+      const gap = lv ? Math.round((Date.parse(state.date) - Date.parse(lv)) / 864e5) : 9999;
+      const dn = typeof w.wind_dir === "number" ? (w.wind ? ["北", "北東", "東", "南東", "南", "南西", "西", "北西"][Math.floor(((w.wind_dir - 1) % 16) / 2)] : "無風") : (w.wind_dir || "-");
+      const avg = fs?.st?.["0"]?.n?.[0] ?? stAvg[i];
+      const val = {
+        v: state.venue, "帯": avg != null ? String(bin(avg, sd.bins["帯"])) : null, cls: e.class, local: e.branch === LOCALB[state.venue] ? "1" : "0",
+        "間": String(bin(slot === "s1" ? gap : 1, sd.bins["間"])), "風": String(bin(w.wind ?? 2, sd.bins["風"])), "波": String(bin(w.wave ?? 2, sd.bins["波"])),
+        "天候": w.sky || "-", dir: `${state.venue}_${dn}`, fk: String(Math.min(fc, 2)),
+      };
+      sd.cols.forEach((k) => { delay += m[k]?.[val[k]] ?? 0; });
+    }
+    const label = [SLOTNAME[slot], fc ? "F持ち" : prevF ? "前期F" : ""].filter(Boolean).join("・");
+    return `<div class="v sub fst">${label}想定 ${fst(base + fadd + prevF + delay)}</div>`;
   };
   const rows = E.map((e, i) => {
     const s = sh[i];
@@ -822,7 +852,7 @@ async function drawCardTab(v, race) {
       <td class="name"><span class="nm" data-reg="${e.regno || ""}" data-course="${e.course || e.boat}">${esc(e.name || "")}</span>
         ${e.class ? `<br><span class="cls ${e.class}">${e.class}</span>` : ""}
         <br><small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}${e.weight ? ` ${e.weight}kg` : ""}</small></td>
-      <td>${two(fst(stAvg[i]), col.stAvg[i], `${e.course || e.boat}コ ${fst(stCourse[i])}<small class="cnt">(${stCourseN[i]})</small>`, col.stCourse[i])}${fLine(i, e)}</td>
+      <td>${two(fst(stAvg[i]), col.stAvg[i], `${e.course || e.boat}コ ${fst(stCourse[i])}<small class="cnt">(${stCourseN[i]})</small>`, col.stCourse[i])}${stLine(i, e)}</td>
       <td>${two((() => {
         const x = files[i]?.fst;
         if (!x) return `<span class="${f ? "red" : ""}">F${f}</span>`;
@@ -859,7 +889,7 @@ async function drawCardTab(v, race) {
           ${hasResult ? "<th>展示<br><small>進入</small></th><th>ST<br><small>着順</small></th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。Fは今の期(11〜4月・5〜10月)のフライング数、( )は前の期のフライング数(F休みが未消化の可能性)。Lは直近1年の回数。平均STの赤字は、今の期にF持ちならF持ち中の平均(5本未満は想定)、前の期だけFなら「前期F 想定」。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
+      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。Fは今の期(11〜4月・5〜10月)のフライング数、( )は前の期のフライング数(F休みが未消化の可能性)。Lは直近1年の回数。平均STの赤字は想定ST: ふだんのコース別平均に、F持ち・前期F・初日/2日目の遅れ(平均STの帯・級別・地元・その場が久しぶりか・風速・波・天候・風向で変わる)を足した値。3日目以降のF持ちで、F持ち中の実績が5本以上ならその平均。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
     </div>
 `;
   const dn = $("dayNav");
