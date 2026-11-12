@@ -28,17 +28,20 @@ from collect import load_grades  # noqa: E402
 M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走分)
 WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
-FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu"]
-FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績"]
+FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu",
+            "ex_st", "parts", "tilt", "motor_form"]
+FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績",
+                 "展示ST", "部品交換", "チルト", "モーターの調子"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
-GROUPS = [[0], [1], [2], [3], [4], [5], [6], [7, 8, 9], [10]]
-GROUP_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績"]
+GROUPS = [[0, 11, 12, 13], [1], [2], [3], [4], [5], [6], [7, 8, 9], [10, 14]]
+GROUP_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・モーターの調子"]
 ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、今は蒲郡のみ)。コースの平均を引いて、速いほど大きくして使う
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
 SETSU_K = 6      # 節間成績: 走数が少ないときに0(平均)へ寄せる強さ。値 = 平均 × n/(n+6)
 SETSU_CM = {}    # 場×コースの平均着順(予想がないレースの節間成績に使う。画面にも渡す)
-ROWMETA = []     # 学習に使う各レース: (場, 日, R, {コース: 登番})
-RESULTS = []     # 5場の全レースの着順: (場, 登番, 日, R, コース, 着順)
+ROWMETA = []     # 学習に使う各レース: (場, 日, R, {コース: 登番}, {コース: モーター番号})
+MOTOR_DAYS, MOTOR_K = 90, 12   # モーターの調子: 直近90日のその場での(着順 − 予想の着順)の平均を走数で寄せる
+RESULTS = []     # 5場の全レースの着順: (場, 登番, 日, R, コース, 着順, モーター番号)
 
 
 def setsu_value(srec, code, regno, day):
@@ -162,9 +165,10 @@ def build():
                             b["motor_2"] if b.get("motor_2") is not None else np.nan,
                             CLS.get(b.get("class"), np.nan), adj, fc] + \
                         [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")] + \
-                        [setsu_value(srec, code, e["regno"], day)]
+                        [setsu_value(srec, code, e["regno"], day)] + before_feats(day, code, race["no"], e["boat"]) + [np.nan]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
-                ROWMETA.append((code, day, int(race["no"]), {k: courses[k]["regno"] for k in range(1, 7)}))
+                ROWMETA.append((code, day, int(race["no"]), {k: courses[k]["regno"] for k in range(1, 7)},
+                                {k: courses[k].get("motor_no") for k in range(1, 7)}))
                 H.append(any(e.get("nat_win") is not None for e in de.values()))  # 出走表(勝率など)があるレースか
                 V.append(VENUE_IDX[code])
                 S.append(grade_cat(grades.get((code, day.isoformat()))) == "sgg1")
@@ -182,7 +186,7 @@ def build():
                 c, p = e["course"], e.get("place")
                 if code in SETSU_CM and 1 <= c <= 6:
                     srec[(code, e["regno"], day)].append((p or 6) - SETSU_CM[code][c])
-                    RESULTS.append((code, e["regno"], day, int(race["no"]), c, p or 6))
+                    RESULTS.append((code, e["regno"], day, int(race["no"]), c, p or 6, e.get("motor_no")))
                 s = selfc[e["regno"]][c]
                 if re.match(r"^\d?\.\d+$", e.get("st") or ""):
                     (stF if fcnt[(e["regno"], f_period(day))] else stN)[e["regno"]] += [float(e["st"]), 1]
@@ -256,7 +260,7 @@ def fit(X, N, P, Y):
 
 # ---------------------------------------------------------------- 予想決まり手
 KM3 = ("差し", "まくり", "まくり差し")
-KIM_M = 20
+KIM_M = 40
 KIM_TY = ["逃げ", "差し", "まくり", "まくり差し"]
 KIM_ALT = [(1, "逃げ")] + [(k, t) for k in range(2, 7) for t in KM3] + [(0, "その他")]
 KIM_FEATS = [("exh", -1), ("avg_st", -1), ("lap", 1), ("turn", 1), ("straight", 1)]  # 標準化した値に掛ける向き(速いほど+)
@@ -358,6 +362,71 @@ def org_of(day, code, no):
             with open(p, encoding="utf-8") as f:
                 o = json.load(f).get("org")
     return o or {}
+
+
+_bp_cache = {}
+
+
+def st_num(st):
+    """展示STの文字列 → 数値。Fはマイナス、出遅れなどは None。"""
+    if not st or not any(ch.isdigit() for ch in st):
+        return None
+    try:
+        v = float(st.replace("F", "").replace("L", ""))
+    except ValueError:
+        return None
+    return -v if st.startswith("F") else v
+
+
+def before_feats(day, code, no, boat):
+    """直前情報から [展示ST, 部品交換(0/1), チルト]。過去分(before_past)か、保存した直前情報。"""
+    import gzip
+    if day not in _bp_cache:
+        p = os.path.join(DATA, "before_past", f"{day:%Y}", f"{day:%Y%m%d}.json.gz")
+        d = {}
+        if os.path.exists(p):
+            with gzip.open(p, "rt", encoding="utf-8") as f:
+                d = json.load(f)
+        _bp_cache[day] = d
+    key = f"{code}_{int(no):02d}"
+    b = _bp_cache[day].get(key)
+    if b is None:
+        p = os.path.join(DATA, "before", f"{day:%Y%m%d}", f"{key}.json")
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as f:
+                b = json.load(f)
+    if not b:
+        return [np.nan, np.nan, np.nan]
+    st = next((x.get("st") for x in (b.get("start") or []) if x.get("boat") == boat), None)
+    be = (b.get("entries") or {}).get(str(boat)) or {}
+    v = st_num(st)
+    t = be.get("tilt")
+    return [np.nan if v is None else v, (1.0 if be.get("parts") else 0.0) if be else np.nan, np.nan if t is None else float(t)]
+
+
+def motor_by_expect(E):
+    """モーターの調子: その場の直近 MOTOR_DAYS 日の(着順 − 予想の着順)の平均を走数で0に寄せる。小さいほど好調。"""
+    mrec = collections.defaultdict(list)
+    for code, rg, day, no, c, pl, mno in RESULTS:
+        if mno is None:
+            continue
+        e = E.get((code, day, no, c))
+        mrec[(code, mno)].append((day, pl - (e if e is not None else SETSU_CM[code][c])))
+    for v in mrec.values():
+        v.sort(key=lambda x: x[0])
+    out = np.full((len(ROWMETA), 7), np.nan)
+    import bisect
+    for i, (code, day, no, regs, motors) in enumerate(ROWMETA):
+        for k in range(1, 7):
+            lst = mrec.get((code, motors.get(k)))
+            if not lst:
+                continue
+            ds = [d for d, _ in lst]
+            a, b = bisect.bisect_left(ds, day - dt.timedelta(days=MOTOR_DAYS)), bisect.bisect_left(ds, day)
+            xs = [x for _, x in lst[a:b]]
+            if xs:
+                out[i, k] = float(np.mean(xs)) * len(xs) / (len(xs) + MOTOR_K)
+    return out
 
 
 def org_transform(F, V):
@@ -530,11 +599,11 @@ def setsu_by_expect(E):
     """節間成績(予想との差): 前日までの(着順 − 予想の着順)の平均を走数で0に寄せる。
     予想の着順 = 1×1着率 + 2×2着率 + 3×3着率 + 5×(4着以下)。予想がないレース(前付けなど)はコース平均との差。"""
     srec = collections.defaultdict(list)
-    for code, rg, day, no, c, pl in RESULTS:
+    for code, rg, day, no, c, pl, _ in RESULTS:
         e = E.get((code, day, no, c))
         srec[(code, rg, day)].append(pl - (e if e is not None else SETSU_CM[code][c]))
     out = np.full((len(ROWMETA), 7), np.nan)
-    for i, (code, day, no, regs) in enumerate(ROWMETA):
+    for i, (code, day, no, regs, _) in enumerate(ROWMETA):
         for k in range(1, 7):
             out[i, k] = setsu_value(srec, code, regs[k], day)
     return out
@@ -560,8 +629,8 @@ def main():
     Z[prog] = Zp
     LQ = base_lq(X, N, P, W)
     # 節間成績は「予想との差」で測る: いったん節間成績なしで予想を作り、その予想の着順と実際の差から作り直す
-    SI = FEATURES.index("setsu")
-    feats0 = [i for i in range(len(FEATURES)) if i != SI]
+    SI, MI = FEATURES.index("setsu"), FEATURES.index("motor_form")
+    feats0 = [i for i in range(len(FEATURES)) if i not in (SI, MI)]
     c0, b0 = fit_logit(LQ, Z, Y, V, S, KD, feats0, True, rows=prog)
     E = {}
     for st in range(0, len(prog), 4000):
@@ -569,10 +638,11 @@ def main():
         mg = predict_marg(LQ, Z, Y, V, S, KD, c0, b0, rr)
         ex_place = mg[:, :, 0] + 2 * mg[:, :, 1] + 3 * mg[:, :, 2] + 5 * (1 - mg.sum(2))
         for r_, i in enumerate(rr):
-            code, day, no, _ = ROWMETA[i]
+            code, day, no = ROWMETA[i][:3]
             for k in range(1, 7):
                 E[(code, day, no, k)] = float(ex_place[r_, k])
     F[:, :, SI] = setsu_by_expect(E)
+    F[:, :, MI] = motor_by_expect(E)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         Zp, sd = standardize(F[prog])
@@ -602,7 +672,7 @@ def main():
                    "W": np.round(W, 4).tolist(),
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
                    "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
-                   "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect",
+                   "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect", "motor_days": MOTOR_DAYS, "motor_k": MOTOR_K,
                    "setsu_base_mask": (1 << (len(GROUPS) + 1)) - 1 - (1 << len(GROUPS) - 1),
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))

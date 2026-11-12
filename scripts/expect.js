@@ -27,6 +27,15 @@ const model = J("data/model/weights.json"), vs = J("data/stats/venues.json");
 if (!dayData || !model || !vs) process.exit(0);
 state.day = dayData;
 state.featMask = model.setsu_base_mask ?? null;
+// 過去の直前情報(before_past、gzip)
+const zlib = require("zlib");
+let _bp;
+const bpast = () => {
+  if (_bp === undefined) {
+    try { _bp = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(ROOT, `data/before_past/${day.slice(0, 4)}/${day}.json.gz`))).toString()); } catch (e) { _bp = null; }
+  }
+  return _bp;
+};
 const out = {};
 for (const code of ["07", "08", "11", "12", "19"]) {
   const v = dayData.venues?.[code];
@@ -34,7 +43,7 @@ for (const code of ["07", "08", "11", "12", "19"]) {
   for (const race of Object.values(v.races)) {
     if (!race.entries?.length) continue;
     const no = String(race.no).padStart(2, "0");
-    const bi = J(`data/before/${day}/${code}_${no}.json`);
+    const bi = J(`data/before/${day}/${code}_${no}.json`) || bpast()?.[`${code}_${no}`] || null;
     let order = [0, 1, 2, 3, 4, 5, 6];
     const byC = {};
     race.entries.forEach((e) => { if (e.course >= 1 && e.course <= 6) byC[e.course] = e.boat; });

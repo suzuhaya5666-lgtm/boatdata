@@ -58,8 +58,6 @@ def build(day, code):
     if not v:
         return None
     n = v.get("day") or 1
-    if n <= 1:
-        return None
     acc = {}
     for back in range(1, n):
         d = day - dt.timedelta(days=back)
@@ -110,7 +108,26 @@ def build(day, code):
             if vals:
                 racers.setdefault(rg, {})["setsu"] = round(sum(vals) / len(vals) * len(vals) / (len(vals) + kk), 4)
                 racers[rg]["setsu_n"] = len(vals)
-    return {"day": n, "title": v.get("title"), "racers": racers}
+    # モーターの調子: その場の直近 motor_days 日の(着順 − 予想の着順)の平均を走数で寄せる。model.py と同じ
+    motors = {}
+    md, mk = w.get("motor_days"), w.get("motor_k", 12)
+    if cm and md:
+        acc = {}
+        for back in range(1, md + 1):
+            pd = day - dt.timedelta(days=back)
+            pv = races_of(pd, code)
+            if not pv:
+                continue
+            ex = expect_of(pd)
+            for r in pv.get("races", {}).values():
+                for e in r.get("entries", []):
+                    c = e.get("course") or e.get("boat")
+                    if e.get("motor_no") is None or not 1 <= c <= 6 or (e.get("place") is None and not e.get("status")):
+                        continue
+                    ev = (ex.get(f"{code}_{int(r.get('no')):02d}") or {}).get(str(e.get("boat")))
+                    acc.setdefault(e["motor_no"], []).append((e.get("place") or 6) - (ev if ev is not None else cm[c]))
+        motors = {str(m): round(sum(x) / len(x) * len(x) / (len(x) + mk), 4) for m, x in acc.items()}
+    return {"day": n, "title": v.get("title"), "racers": racers, "motors": motors}
 
 
 def main():

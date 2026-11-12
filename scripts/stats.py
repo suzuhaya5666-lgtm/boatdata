@@ -256,7 +256,7 @@ def kim_counts(recs):
     return c1, ck
 
 
-KIM_M = 20  # 回数が少ない選手は全体の率に20走分寄せる(出目の検証と同じ)
+KIM_M = 40  # 回数が少ない選手は全体の率に40走分寄せる(出目の検証と同じ)
 
 
 def bucket(recs):

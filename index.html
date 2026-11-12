@@ -1758,6 +1758,15 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     }
     if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
     if (f === "setsu") return bi?.series?.racers?.[e.regno]?.setsu ?? null;  // 節間成績(小さいほど好調)
+    if (f === "motor_form") return bi?.series?.motors?.[e.motor_no] ?? null;  // モーターの調子(小さいほど好調)
+    if (f === "ex_st") {  // 展示ST(Fはマイナス)
+      const st = (bi?.start || []).find((x) => x.boat === b)?.st;
+      if (!st || !/\d/.test(st)) return null;
+      const v = parseFloat(st.replace(/[FL]/g, ""));
+      return Number.isNaN(v) ? null : st.startsWith("F") ? -v : v;
+    }
+    if (f === "parts") return bi?.entries?.[b] ? (bi.entries[b].parts?.length ? 1 : 0) : null;
+    if (f === "tilt") return bi?.entries?.[b]?.tilt ?? null;
     if (f === "class") return CLS_NUM[e.class] ?? null;
     if (f === "avg_st") return racers[b]?.fst?.st_adj ?? racers[b]?.sheet?.all?.st?.total?.avg ?? null;  // F持ちならF持ち時の平均ST
     if (f === "f_cnt") return racers[b]?.fst?.f ?? 0;
@@ -1958,7 +1967,7 @@ async function drawDemeTab(v, race, keepPos) {
 
   const adj = demeAdjust(demeQ(order, racers, vs.venues[state.venue].all, model), order, ents, racers, bi, model, race);
   const q = adj.q;
-  const hasExh = adj.used.includes("展示タイム");
+  const hasExh = adj.used.some((g) => g.startsWith("展示"));
   const boatOf = (c) => order[c];
   // 切る艇: その艇が3着以内に来ない前提で、残りの組み合わせだけで確率を出し直す
   state.cuts = state.cuts || {};
