@@ -1168,6 +1168,13 @@ async function getBefore(hd, venue, no) {
   } catch (e) { /* 読めなければサイト側を見る */ }
   return getJSON(path).catch(() => null);
 }
+
+// 節間平均の展示・オリ展(節の2日目以降、展示前の出目確率に使う)。直前情報に series として添える
+async function withSeries(bi, hd, venue) {
+  const [sm, sr] = await Promise.all([cached("data/model/series.json"), cached(`data/series/${hd}/${venue}.json`)]);
+  if (!sm?.[venue] || !sr?.racers) return bi;
+  return { ...(bi || {}), series: sr, seriesModel: sm[venue] };
+}
 const cache = {};
 async function cached(path) {
   if (!(path in cache)) {
@@ -1490,12 +1497,32 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     const mean = have.length ? have.reduce((a, b) => a + b, 0) / have.length : 0;
     [1, 2, 3, 4, 5, 6].forEach((k, n) => { Z[k][i] = ((raw[n] ?? mean) - mean) / model.sd[i]; });
   });
+  // 展示前で、節の2日目以降なら 節間平均の展示・オリ展 を足す(係数は data/model/series.json)
+  const SM = bi?.seriesModel, SR = bi?.series?.racers;
+  const actualExh = [1, 2, 3, 4, 5, 6].some((k) => val("exh", order[k], k) != null);
+  let SZ = null;
+  if (!actualExh && SM && SR) {
+    SZ = {};
+    for (let k = 1; k <= 6; k++) SZ[k] = [];
+    SM.keys.forEach((f, fi) => {
+      const raw = [1, 2, 3, 4, 5, 6].map((k) => {
+        const x = SR[ents[order[k]]?.regno]?.[f];
+        return x == null ? null : SM.cm[fi] ? x - SM.cm[fi][k - 1] : x;
+      });
+      const have = raw.filter((x) => x != null);
+      const mean = have.length ? have.reduce((a, b) => a + b, 0) / have.length : 0;
+      [1, 2, 3, 4, 5, 6].forEach((k, n) => { SZ[k][fi] = -((raw[n] ?? mean) - mean) / SM.sd[fi]; });
+    });
+    if (Object.keys(SR).length && [1, 2, 3, 4, 5, 6].some((k) => SR[ents[order[k]]?.regno])) used.push("節間平均の展示・オリ展");
+    else SZ = null;
+  }
   const out = {};
   for (let k = 1; k <= 6; k++) out[k] = [0, 0, 0];
   for (let j = 0; j < 3; j++) {
     const c = model.coef[j];
     const cb = biasFor(model.cbias?.[j], race);
-    const sc = [1, 2, 3, 4, 5, 6].map((k) => c[0] * Math.log(q[k][j]) + Z[k].reduce((a, z, i) => a + c[i + 1] * z, 0) + cb[k]);
+    const sc = [1, 2, 3, 4, 5, 6].map((k) => c[0] * Math.log(q[k][j]) + Z[k].reduce((a, z, i) => a + c[i + 1] * z, 0) + cb[k]
+      + (SZ ? SZ[k].reduce((a, z, fi) => a + SM.coef[j][fi] * z, 0) : 0));
     const mx = Math.max(...sc);
     const ex = sc.map((x) => Math.exp(x - mx));
     const sum = ex.reduce((a, b) => a + b, 0);
@@ -1598,7 +1625,7 @@ async function computeDeme(race) {
   const hd = state.date.replace(/-/g, "");
   const [model, vs, bi, ...files] = await Promise.all([
     cached("data/model/weights.json"), cached("data/stats/venues.json"),
-    getBefore(hd, vc, race.no),
+    getBefore(hd, vc, race.no).then((b) => withSeries(b, hd, vc)),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
   if (!model || !vs) return null;
   const racers = Object.fromEntries(race.entries.map((e, i) => [e.boat, files[i]]));
@@ -1635,7 +1662,7 @@ async function drawDemeTab(v, race, keepPos) {
   const hd = state.date.replace(/-/g, "");
   const [model, vs, bi, ...files] = await Promise.all([
     cached("data/model/weights.json"), cached("data/stats/venues.json"),
-    getBefore(hd, state.venue, race.no),
+    getBefore(hd, state.venue, race.no).then((b) => withSeries(b, hd, state.venue)),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
   const kimModel = await cached("data/model/kimarite.json");
   const nige2 = await cached("data/model/nige2.json");
@@ -1767,7 +1794,7 @@ async function drawDemeTab(v, race, keepPos) {
     </div>
     <div class="card">
       <h2>各艇の着順確率</h2>
-      <div class="meta"><span>${hasExh ? "展示タイム込み" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
+      <div class="meta"><span>${hasExh ? "展示タイム込み" : adj.used.includes("節間平均の展示・オリ展") ? "展示前（節間平均の展示・オリ展で補正）" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
       <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th><th>3連対</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
     </div>
