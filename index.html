@@ -258,6 +258,14 @@
   .pop.over { background: #ffe3e3; color: #c92a2a; } .pop.fair { background: #f1f3f5; color: #495057; } .pop.under { background: #d3f9d8; color: #2b8a3e; }
   table.memo td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
   .hot2t { font-size: 11px; margin-left: 1px; }
+  table.buff { width: 100%; border-collapse: collapse; font-size: 13px; }
+  table.buff th, table.buff td { padding: 3px 2px; text-align: center; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.buff tbody th { text-align: left; font-weight: 400; font-size: 12px; }
+  table.buff td.bplus { background: rgba(232, 89, 12, .16); color: #d9480f; }
+  table.buff td.bminus { background: rgba(21, 101, 192, .14); color: #1864ab; }
+  table.buff td.bzero { color: var(--sub); }
+  table.buff tr.bsep td { border-bottom: 2px solid var(--line); padding: 0; }
+  table.buff .bnum { all: unset; cursor: pointer; display: block; min-width: 30px; padding: 4px 0; }
   .warn2t { background: #fff4e6; border: 1px solid #ffc078; font-size: 13px; line-height: 1.6; }
   .warn2t > div + div { margin-top: 4px; }
   .plus { color: #2b8a3e; font-weight: 700; } .minus { color: #e03131; font-weight: 700; }
@@ -1846,8 +1854,20 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
   const used = [];
   const Z = {};
   for (let k = 1; k <= 6; k++) Z[k] = [];
+  // 査定の内訳(各艇の材料ごとの＋−)用。表示する値は元の値(オリ展は秒)
+  const disp = (f, b, k) => {
+    const e = ents[b] || {};
+    if (ORGK.includes(f)) return bi?.org?.[b]?.[f] ?? null;
+    if (f === "class") return e.class || null;
+    if (f === "parts") return bi?.entries?.[b] ? (bi.entries[b].parts?.join("・") || "なし") : null;
+    if (f === "local") { const x = val(f, b, k); return x == null ? null : x ? "地元" : "地元外"; }
+    if (f === "ex_st") return (bi?.start || []).find((x) => x.boat === b)?.st ?? null;
+    return val(f, b, k);
+  };
+  const items = [];
   model.features.forEach((f, i) => {
     const raw = [1, 2, 3, 4, 5, 6].map((k) => val(f, order[k], k));
+    items.push({ name: model.feature_names[i], i, disp: [0, 1, 2, 3, 4, 5, 6].map((k) => k ? disp(f, order[k], k) : null) });
     const have = raw.filter((x) => x != null && !Number.isNaN(x));
     const gname = (model.group_names || model.feature_names)[gOf[i]];
     if (have.length && (mask >> gOf[i] & 1) && !used.includes(gname)) used.push(gname);
@@ -1869,12 +1889,18 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
       const have = raw.filter((x) => x != null);
       const mean = have.length ? have.reduce((a, b) => a + b, 0) / have.length : 0;
       [1, 2, 3, 4, 5, 6].forEach((k, n) => { SZ[k][fi] = -((raw[n] ?? mean) - mean) / SM.sd[fi]; });
+      const SN = { exh: "展示タイム", lap: "一周", turn: "まわり足", straight: "直線" };
+      items.push({ name: `節間平均の${SN[f] || f}`, s: fi, disp: [0, 1, 2, 3, 4, 5, 6].map((k) => k ? SR[ents[order[k]]?.regno]?.[f] ?? null : null) });
     });
     if (Object.keys(SR).length && [1, 2, 3, 4, 5, 6].some((k) => SR[ents[order[k]]?.regno])) used.push("節間平均の展示・オリ展");
     else SZ = null;
   }
   const out = {};
   for (let k = 1; k <= 6; k++) out[k] = [0, 0, 0];
+  // contrib[k][j][n]: コース k の艇の、j着の点数への材料 items[n] の効き(係数×レース内の差)
+  const contrib = {};
+  for (let k = 1; k <= 6; k++) contrib[k] = [0, 1, 2].map((j) => items.map((it) =>
+    it.s != null ? (SZ ? SM.coef[j][it.s] * SZ[k][it.s] : 0) : model.coef[j][it.i + 1] * Z[k][it.i]));
   for (let j = 0; j < 3; j++) {
     const c = model.coef[j];
     const cb = biasFor(model.cbias?.[j], race);
@@ -1886,7 +1912,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     [1, 2, 3, 4, 5, 6].forEach((k, n) => { out[k][j] = ex[n] / sum; });
   }
   if (mask >> ng & 1) used.push("コース補正");
-  return { q: out, used, ev: combo.eval, Z };
+  return { q: out, used, ev: combo.eval, Z, items, contrib };
 }
 // 予想決まり手: 場の平均の決まり手に、展示・平均ST・オリジナル展示・決まり手率の差を足す(scripts/model.py の kim_design と同じ並び)
 function kimPredict(km, model, Z, order, racers) {
@@ -2139,6 +2165,7 @@ async function drawDemeTab(v, race, keepPos) {
     ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race, bi?.weather)}
     ${kimCardHtml(kimPredict(kimModel, model, adj.Z, order, racers), v.name)}
     ${featCard(model, adj)}
+    ${buffCard(adj, order)}
     <div class="card">
       <h2>頭固定</h2>
       <div class="slots">${[1, 2, 3, 4, 5, 6].map((b) => `<button class="slot headbtn ${head === b ? "on" : ""}" data-head="${b}"><small>${head === b ? "1着" : "&nbsp;"}</small>${bb(b)}</button>`).join("")}</div>
@@ -2219,6 +2246,8 @@ async function drawDemeTab(v, race, keepPos) {
     if (cut.size) state.cuts[key] = [...cut]; else delete state.cuts[key];
     drawDemeTab(v, race, true);
   });
+  $("view-race").querySelectorAll("[data-buffj]").forEach((b) => b.onclick = () => { state.buffJ = Number(b.dataset.buffj); drawDemeTab(v, race, true); });
+  $("view-race").querySelectorAll("[data-buff]").forEach((b) => b.onclick = () => openBuff(adj, order, ents, Number(b.dataset.buff)));
   $("view-race").querySelectorAll("[data-trimode]").forEach((b) => b.onclick = () => {
     state.triMode = b.dataset.trimode; state.triN = 20; drawDemeTab(v, race, true);
   });
@@ -2238,6 +2267,61 @@ async function drawDemeTab(v, race, keepPos) {
   if (rc) rc.onclick = () => { delete state.cuts[key]; delete state.heads[key]; drawDemeTab(v, race, true); };
   const rb = $("resetOrder");
   if (rb) rb.onclick = () => { delete state.orders[key]; state.pick = null; drawDemeTab(v, race, true); };
+}
+
+// 各艇の査定(材料ごとの＋−)。数字は「その着になる強さ」を何%上げ下げしたか(exp(効き)-1)
+const buffPct = (x) => (Math.exp(x) - 1) * 100;
+const buffFmt = (x) => { const p = buffPct(x); return Math.abs(p) < 0.5 ? "0" : `${p > 0 ? "+" : ""}${p.toFixed(0)}`; };
+const buffCls = (x) => { const p = buffPct(x); return p >= 0.5 ? "bplus" : p <= -0.5 ? "bminus" : "bzero"; };
+const buffDisp = (v) => v == null ? "-" : typeof v === "number" ? (Number.isInteger(v) ? String(v) : v.toFixed(2)) : esc(String(v));
+function buffCard(adj, order) {
+  if (!adj.contrib || !adj.items?.length) return "";
+  const j = state.buffJ || 0;
+  const B = [1, 2, 3, 4, 5, 6];
+  const cOf = Object.fromEntries(B.map((c) => [order[c], c]));  // 艇番 -> コース
+  const v = (b, n) => adj.contrib[cOf[b]][j][n];
+  const idx = adj.items.map((_, n) => n).filter((n) => B.some((b) => Math.abs(v(b, n)) >= 0.005))
+    .sort((x, y) => Math.max(...B.map((b) => Math.abs(v(b, y)))) - Math.max(...B.map((b) => Math.abs(v(b, x)))));
+  const sum = (b, f) => adj.items.reduce((a, _, n) => a + (f(v(b, n)) ? v(b, n) : 0), 0);
+  const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  const cell = (b, x, strong) => `<td class="${buffCls(x)}"><button class="bnum" data-buff="${b}">${strong ? `<b>${buffFmt(x)}</b>` : buffFmt(x)}</button></td>`;
+  const row = (label, f, strong) => `<tr><th>${label}</th>${B.map((b) => cell(b, f(b), strong)).join("")}</tr>`;
+  return `<div class="card"><h2>各艇の査定（プラス・マイナス）</h2>
+    <div class="pills">${["1着", "2着", "3着"].map((l, i) => `<button class="pill2 ${j === i ? "on" : ""}" data-buffj="${i}">${l}</button>`).join("")}</div>
+    <div class="tbl"><table class="buff"><thead><tr><th></th>${B.map((b) => `<th>${bb(b)}<br><small>${cOf[b]}コース</small></th>`).join("")}</tr></thead><tbody>
+      ${row("差し引き", (b) => sum(b, () => true), true)}
+      ${row("＋の合計", (b) => sum(b, (x) => x > 0))}
+      ${row("−の合計", (b) => sum(b, (x) => x < 0))}
+      <tr class="bsep"><td colspan="7"></td></tr>
+      ${idx.map((n) => row(esc(adj.items[n].name), (b) => v(b, n))).join("")}
+    </tbody></table></div>
+    <div class="note">材料（展示・勝率・モーターなど）ごとに、その艇の${j + 1}着になる強さを何%上げ下げしたか。レース内の6艇の平均と比べた差に係数を掛けたもので、コース別成績とコース補正は含みません。数字をタップすると、その艇の内訳（元の値と1〜3着それぞれの効き）を出します。</div></div>`;
+}
+function openBuff(adj, order, ents, b) {
+  const B = [1, 2, 3, 4, 5, 6];
+  const c = B.find((k) => order[k] === b);
+  const e = ents[b] || {};
+  const j = state.buffJ || 0;
+  const bb = (x) => `<span class="mini k${x}">${x}</span>`;
+  const idx = adj.items.map((_, n) => n).filter((n) => [0, 1, 2].some((jj) => Math.abs(adj.contrib[c][jj][n]) >= 0.005))
+    .sort((x, y) => adj.contrib[c][j][y] - adj.contrib[c][j][x]);
+  const avg = (n) => { const xs = B.map((k) => adj.items[n].disp[k]).filter((x) => typeof x === "number"); return xs.length ? xs.reduce((a, x) => a + x, 0) / xs.length : null; };
+  const tot = (jj, f) => adj.items.reduce((a, _, n) => a + (f(adj.contrib[c][jj][n]) ? adj.contrib[c][jj][n] : 0), 0);
+  const tr = (label, xs, sub = "") => `<tr><td style="text-align:left">${label}</td><td>${sub}</td>${xs.map((x) => `<td class="${buffCls(x)}">${buffFmt(x)}</td>`).join("")}</tr>`;
+  $("modal").hidden = false;
+  $("sheet").innerHTML = `
+    <button class="close" id="bclose">閉じる</button>
+    <h2>${bb(b)} ${esc(e.name || "")} <small style="color:var(--sub)">${c}コースの査定</small></h2>
+    <div class="tbl" style="margin-top:10px"><table class="buff detail"><thead><tr><th>材料</th><th>値<br><small>6艇平均</small></th><th>1着</th><th>2着</th><th>3着</th></tr></thead><tbody>
+      ${tr("<b>差し引き</b>", [0, 1, 2].map((jj) => tot(jj, () => true)))}
+      ${tr("＋の合計", [0, 1, 2].map((jj) => tot(jj, (x) => x > 0)))}
+      ${tr("−の合計", [0, 1, 2].map((jj) => tot(jj, (x) => x < 0)))}
+      <tr class="bsep"><td colspan="5"></td></tr>
+      ${idx.map((n) => { const a = avg(n); return tr(esc(adj.items[n].name), [0, 1, 2].map((jj) => adj.contrib[c][jj][n]),
+        `${buffDisp(adj.items[n].disp[c])}${a != null ? `<br><small class="cnt">${buffDisp(a)}</small>` : ""}`); }).join("")}
+    </tbody></table></div>
+    <div class="note">数字は、その着になる強さを何%上げ下げしたか（＋は来やすく、−は来にくく）。${j + 1}着の効きが大きい順。展示タイム・平均ST・節間成績などは小さいほど良いので、平均より小さければ＋になります。オリジナル展示はコースごとの平均と比べています。</div>`;
+  $("bclose").onclick = closeModal;
 }
 
 function featCard(model, adj) {
