@@ -203,18 +203,27 @@ def f_period(d):
 
 
 def f_state(recs, today):
-    """今の期のF数と、F持ちを考えた平均ST(出目確率の材料)。"""
+    """今の期のF数と、F持ちを考えた平均ST(出目確率の材料)。
+    st: コース別(0=全体)に、F持ちでないとき(n)・F1本のとき(f1)・F2本以上のとき(f2)の [平均, 本数](全期間)。"""
     fcnt = collections.Counter()
     n = [0.0, 0]
     fs = [0.0, 0]
-    for date, _, _, _, _, _, _, _, st_raw, _, status, *_ in recs:
+    byc = {c: {"n": [0.0, 0], "f1": [0.0, 0], "f2": [0.0, 0]} for c in range(7)}
+    for date, _, c, _, _, _, _, _, st_raw, _, status, *_ in recs:
         v = st_value(st_raw)
         if v is not None:
-            a = fs if fcnt[f_period(date)] else n
+            k = fcnt[f_period(date)]
+            a = fs if k else n
             a[0] += v
             a[1] += 1
+            key = "n" if not k else "f1" if k == 1 else "f2"
+            for cc in (0, c if c in byc else None):
+                if cc is not None:
+                    byc[cc][key][0] += v
+                    byc[cc][key][1] += 1
         if (st_raw or "").startswith("F") or (status or "").startswith("F"):
             fcnt[f_period(date)] += 1
+    st = {str(c): {k: [round(x[0] / x[1], 4), x[1]] for k, x in d.items() if x[1]} for c, d in byc.items()}
     f = fcnt[f_period(today)]
     normal = n[0] / n[1] if n[1] else None
     if f == 0:
@@ -223,7 +232,7 @@ def f_state(recs, today):
         adj = fs[0] / fs[1]
     else:
         adj = normal + FDELTA[min(f, 2)] if normal is not None else None
-    return {"f": f, "st_adj": round(adj, 4) if adj is not None else None}
+    return {"f": f, "st_adj": round(adj, 4) if adj is not None else None, "st": st}
 
 
 KM3 = ("差し", "まくり", "まくり差し")
@@ -372,6 +381,7 @@ def main():
 
     def shrink(cnt, g):
         return [round((cnt[1 + i] + KIM_M * g[1 + i] / g[0]) / (cnt[0] + KIM_M), 4) for i in range(3)]
+    fd = {k: {str(c): [0.0, 0] for c in range(7)} for k in ("f1", "f2")}
     for regno, recs in hist.items():
         recs1y = [r for r in recs if r[0] > year_ago]
         if not recs1y:
@@ -388,6 +398,16 @@ def main():
                       **{str(k): {"n": kc[regno][1][k][0], "rate": shrink(kc[regno][1][k], gk[k])} for k in range(2, 7)}}}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:
             json.dump(rr, f, ensure_ascii=False, separators=(",", ":"))
+        for c, d in rr["fst"]["st"].items():  # F持ちで平均STがどれだけ遅くなるか(選手ごとの差を本数で重み付け)
+            if d.get("n", [0, 0])[1] >= 10:
+                for k in ("f1", "f2"):
+                    if k in d:
+                        fd[k][c][0] += (d[k][0] - d["n"][0]) * d[k][1]
+                        fd[k][c][1] += d[k][1]
+    fdelta = {k: {c: round(x[0] / x[1], 4) if x[1] else None for c, x in v.items()} for k, v in fd.items()}
+    with open(os.path.join(DATA, "stats", "fdelta.json"), "w", encoding="utf-8") as f:
+        json.dump({"period": period, "delta": fdelta, "n": {k: {c: x[1] for c, x in v.items()} for k, v in fd.items()}}, f, ensure_ascii=False)
+    print("F持ちの遅れ", fdelta)
 
     # ---- 前付け(枠番 → 進入コース)。直近1年・全場。前付けする選手だけ data/stats/maetsuke.json に
     mae = {}
