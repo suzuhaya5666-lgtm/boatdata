@@ -498,7 +498,7 @@ async function drawHomeHot() {
   let done = 0;
   for (const { code, r } of all) {
     let a = null, o = null, res = null;
-    try { [a, o, res] = await Promise.all([computeDeme({ ...r, _v: code }).then((d) => areOf(d?.prob, code)), favOdds(code, r, date), quickResult(code, r, date)]); } catch (e) { /* なし */ }
+    try { [a, o, res] = await Promise.all([computeDeme({ ...r, _v: code }).then((d) => areOf(d?.prob, code, d?.w)), favOdds(code, r, date), quickResult(code, r, date)]); } catch (e) { /* なし */ }
     if (state.screen !== "home" || state.htab !== "hot" || state.date !== date) return;
     done++;
     const h = hotOf(a, o, code);
@@ -538,7 +538,7 @@ async function fillHomeAre() {
     const hits = [], hots = [];
     for (const r of races) {
       let a = null, o = null;
-      try { [a, o] = await Promise.all([computeDeme({ ...r, _v: code }).then((d) => areOf(d?.prob, code)), favOdds(code, r, date)]); } catch (e) { /* なし */ }
+      try { [a, o] = await Promise.all([computeDeme({ ...r, _v: code }).then((d) => areOf(d?.prob, code, d?.w)), favOdds(code, r, date)]); } catch (e) { /* なし */ }
       if (state.screen !== "home" || state.date !== date) return;
       const h = hotOf(a, o, code);
       if (h.combo) hots.push(`<span class="arebadge hot">💥 ${r.no}R 激アツ</span>`);
@@ -592,50 +592,60 @@ function drawList() {
 }
 
 // ---------------------------------------------------------------- 荒れレースアラート(蒲郡)
-// 出目確率の上位10点の合計で段階分け。数字は 2024/1〜2026/11 の蒲郡(枠なり)での実績
+// 出目確率の上位10点の合計で段階分け。数字は今の出目確率で、学習に使っていない直近約1年(2025/9〜2026/11)の各場約2,000レースでの実績
 const ARE = {
   "07": [
-    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 23.6, med: 4900, nige: 35 },
-    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 18.1, med: 3690, nige: 39 },
-    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 17.9, med: 2665, nige: 51 },
-    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 13.1, med: 1790, nige: 65 },
-    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 6.0, med: 1140, nige: 74 },
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 31.1, med: 6990, nige: 27 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 17.4, med: 3680, nige: 38 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 14.9, med: 2400, nige: 53 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 13.4, med: 1705, nige: 64 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 6.6, med: 1030, nige: 76 },
   ],
   "08": [
-    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 26.3, med: 5370, nige: 31 },
-    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 21.6, med: 3760, nige: 40 },
-    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 15.7, med: 2740, nige: 54 },
-    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 11.8, med: 1680, nige: 70 },
-    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 5.9, med: 990, nige: 80 },
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 25.0, med: 5300, nige: 23 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 25.2, med: 4090, nige: 35 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 18.7, med: 2690, nige: 50 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 12.5, med: 1690, nige: 69 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 4.5, med: 940, nige: 80 },
   ],
   "11": [
-    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 21.2, med: 5020, nige: 33 },
-    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 19.5, med: 3520, nige: 41 },
-    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 17.0, med: 2610, nige: 50 },
-    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 13.7, med: 1800, nige: 64 },
-    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 12.6, med: 1150, nige: 69 },
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 21.1, med: 4740, nige: 33 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 21.4, med: 3855, nige: 41 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 17.2, med: 2735, nige: 50 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 13.6, med: 1750, nige: 65 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 14.3, med: 1125, nige: 66 },
   ],
   "12": [
-    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 20.0, med: 4625, nige: 32 },
-    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 20.8, med: 3580, nige: 41 },
-    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 15.7, med: 2480, nige: 54 },
-    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 14.5, med: 1870, nige: 67 },
-    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 9.9, med: 1160, nige: 74 },
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 25.6, med: 5960, nige: 28 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 21.9, med: 3510, nige: 43 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 17.4, med: 2520, nige: 52 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 14.1, med: 1985, nige: 64 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 14.5, med: 1350, nige: 72 },
   ],
   "19": [
-    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 27.8, med: 5730, nige: 38 },
-    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 22.1, med: 3630, nige: 45 },
-    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 16.2, med: 2640, nige: 56 },
-    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 12.9, med: 1670, nige: 69 },
-    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 8.4, med: 1025, nige: 80 },
+    { lt: 0.30, lvl: 3, label: "大荒れ注意", icon: "🔥🔥", man: 23.9, med: 5200, nige: 39 },
+    { lt: 0.40, lvl: 2, label: "荒れ注意", icon: "🔥", man: 19.6, med: 2990, nige: 51 },
+    { lt: 0.50, lvl: 1, label: "やや荒れ", icon: "⚠", man: 16.9, med: 2665, nige: 54 },
+    { lt: 0.70, lvl: -1, label: "ふつう", icon: "", man: 11.2, med: 1530, nige: 71 },
+    { lt: 9, lvl: 0, label: "堅め", icon: "🔒", man: 10.5, med: 1045, nige: 80 },
   ],
 };
-function areOf(prob, venue) {
+// 風で1段上げ下げ(直前情報の風): 風速6m以上は荒れやすい(5場 1.28倍)、蒲郡の北・北東の風は荒れにくい(0.45倍前後、2つの期間で同じ)
+function areWind(w, venue) {
+  if (!w) return 0;
+  if (w.wind != null && w.wind >= 6) return 1;
+  const d = typeof w.wind_dir === "number" ? w.wind_dir : WIND.indexOf(w.wind_dir);
+  if (venue === "07" && [1, 2, 3].includes(d)) return -1;
+  return 0;
+}
+function areOf(prob, venue, w) {
   const tbl = ARE[venue];
   const m = prob?.["3連単"];
   if (!tbl || !m) return null;
   const s = Object.values(m).sort((a, b) => b - a).slice(0, 10).reduce((a, p) => a + p, 0);
-  return { s, ...tbl.find((t) => s < t.lt) };
+  const i0 = tbl.findIndex((t) => s < t.lt), sh = areWind(w, venue);
+  const i1 = Math.max(0, Math.min(tbl.length - 1, i0 - sh));
+  return { s, ...tbl[i1], wind: sh, base: tbl[i0].label };
 }
 const areBadge = (a) => a && a.lvl >= 0 ? `<span class="arebadge l${a.lvl}">${a.icon} ${a.label}</span>` : "";
 // オッズ割れ: 3連単の1番人気が SPLIT 倍以上。締切前は最新のオッズ(5分おき)で判定し、下がったら消える
@@ -675,7 +685,7 @@ async function fillAre(races) {
   const venue = state.venue, date = state.date;
   for (const r of races) {
     let a = null, o = null;
-    try { [a, o] = await Promise.all([computeDeme(r).then((d) => areOf(d?.prob, venue)), favOdds(venue, r, date)]); } catch (e) { /* なし */ }
+    try { [a, o] = await Promise.all([computeDeme(r).then((d) => areOf(d?.prob, venue, d?.w)), favOdds(venue, r, date)]); } catch (e) { /* なし */ }
     if (state.screen !== "list" || state.venue !== venue || state.date !== date) return;
     const el = document.querySelector(`[data-are="${r.no}"]`);
     const h = hotOf(a, o, venue);
@@ -697,18 +707,18 @@ async function fillAreOdds(race, a) {
     ? `1番人気${SPLIT}倍以上を「割れ」。この場は荒れ注意以上と割れが重なると万舟が約3割（最終オッズでの検証）なので「激アツ」にしています。オッズは締切に向けて下がりがちなので、基準を割ると消えます。`
     : `1番人気${SPLIT}倍以上を「割れ」（最終オッズでの検証で万舟が約2割）。オッズは締切に向けて下がりがちなので、基準を割ると消えます。`;
 }
-function areCard(prob, venue, vname, race) {
-  const a = areOf(prob, venue);
+function areCard(prob, venue, vname, race, w) {
+  const a = areOf(prob, venue, w);
   if (!a) return "";
   const tbl = ARE[venue];
   if (race) setTimeout(() => fillAreOdds(race, a), 0);
   return `<div class="card"><h2>荒れレースアラート ${areBadge(a)}</h2>
-    <div class="meta"><span>出目確率の上位10点の合計 <b>${(a.s * 100).toFixed(1)}%</b></span><span>判定 <b>${a.label}</b></span></div>
+    <div class="meta"><span>出目確率の上位10点の合計 <b>${(a.s * 100).toFixed(1)}%</b></span><span>判定 <b>${a.label}</b>${a.wind ? `（${esc(a.base)}から風で${a.wind > 0 ? "1段上げ" : "1段下げ"}）` : ""}</span></div>
     ${race ? `<div class="meta" data-areodds="${race.no}"><span>オッズ確認中…</span></div>` : ""}
     <div class="tbl"><table class="cmp"><thead><tr><th>判定</th><th>上位10点の合計</th><th>万舟率</th><th>3連単<br>中央値</th><th>イン逃げ</th></tr></thead><tbody>
     ${tbl.map((t, i) => `<tr class="${t === tbl.find((x) => x.lvl === a.lvl) ? "hit" : ""}"><td>${t.icon} ${t.label}</td><td>${i ? (tbl[i - 1].lt * 100).toFixed(0) : 0}〜${t.lt < 2 ? (t.lt * 100).toFixed(0) + "%" : ""}</td><td>${t.man.toFixed(1)}%</td><td>${t.med.toLocaleString()}円</td><td>${t.nige}%</td></tr>`).join("")}
     </tbody></table></div>
-    <div class="note">出目確率が上位10点に集まっていないほど、展開が読みにくいレース。${esc(vname)}の過去約5,000レース（2024/1〜、枠なり）で、段ごとに実際に万舟（3連単1万円以上）になった割合です（場全体は約15%）。「荒れやすい」の目安で、荒れ注意でも万舟は5レースに1回ほど。</div>
+    <div class="note">出目確率が上位10点に集まっていないほど、展開が読みにくいレース。今の出目確率で、学習に使っていない直近約1年の${esc(vname)}約2,000レースを段ごとに分け、実際に万舟（3連単1万円以上）になった割合です（場全体は14〜16%）。30%未満は年に40〜120レースと少なめ。風速6m以上は1段上げ、蒲郡の北・北東の風は1段下げます（直前情報の風）。「荒れやすい」の目安です。</div>
     ${race ? `<div class="note" data-areoddsnote="${race.no}"></div>` : ""}</div>`;
 }
 
@@ -1919,7 +1929,7 @@ async function computeDeme(race) {
     rank[bet] = Object.fromEntries(sorted.map((k, i) => [k, i + 1]));
     rank[bet]._n = sorted.length;
   });
-  return { prob, rank, exh: !!bi?.start?.length };
+  return { prob, rank, exh: !!bi?.start?.length, w: bi?.weather || null };
 }
 
 async function drawDemeTab(v, race, keepPos) {
@@ -2046,7 +2056,7 @@ async function drawDemeTab(v, race, keepPos) {
       ${maeNote(race, order)}
       ${custom ? '<button class="pill2" id="resetOrder" style="margin-top:8px">' + (bi?.start?.length === 6 ? "展示進入" : "枠なり") + "に戻す</button>" : ""}
     </div>
-    ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race)}
+    ${areCard({ "3連単": Object.fromEntries(triAll.map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race, bi?.weather)}
     ${kimCardHtml(kimPredict(kimModel, model, adj.Z, order, racers), v.name)}
     ${featCard(model, adj)}
     <div class="card">

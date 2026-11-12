@@ -20,7 +20,7 @@ function pick(name) {
   const e = html.indexOf("\n}", start);
   return html.slice(start, html.indexOf("\n", e + 1));
 }
-const NAMES = ["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "raceKind", "biasFor", "demeTri", "ARE", "areOf"];
+const NAMES = ["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "raceKind", "biasFor", "demeTri", "ARE", "WIND", "areWind", "areOf"];
 const src = NAMES.map(pick).join("\n");
 var state = {};
 eval(src.replace(/^const /gm, "var "));
@@ -49,7 +49,7 @@ function predict(code, race, bi, od) {
   const r4 = (x) => Math.round(x * 10000) / 10000;
   const one = (t) => ({ k: t.k, p: r4(t.p), o: o3[t.k] || null });
   const win = {}; tri.forEach((t) => { const b = t.k[0]; win[b] = (win[b] || 0) + t.p; });
-  const a = areOf({ "3連単": Object.fromEntries(tri.map((t) => [t.k, t.p])) }, code);
+  const a = areOf({ "3連単": Object.fromEntries(tri.map((t) => [t.k, t.p])) }, code, bi?.weather);
   const fav = hasOdds ? Math.min(...Object.values(o3).filter((x) => x > 0)) : null;
   return {
     time: now, exh: !!bi?.start?.length, odds: od?.time || null, order: order.slice(1).join(""), used: adj.used,
