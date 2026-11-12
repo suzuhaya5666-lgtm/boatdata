@@ -80,6 +80,8 @@
   .race .badge.wait { background: #e9ecef; color: var(--sub); }
   .hare { margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px; justify-content: center; }
   .harerest { font-size: 12px; color: #c92a2a; font-weight: 700; }
+  .daylink { margin-left: auto; border: 1px solid var(--accent); color: var(--accent); background: #fff; border-radius: 14px; padding: 2px 10px; font-size: 13px; font-weight: 700; }
+  .daynav { flex-wrap: wrap; margin: 6px 0 4px; } .daynav button { line-height: 1.2; }
   .mae { display: inline-block; margin-left: 4px; font-size: 11px; font-weight: 700; padding: 1px 5px; border-radius: 4px; background: #fff0f6; color: #a61e4d; border: 1px solid #fcc2d7; vertical-align: middle; }
   .mae.on { background: #c2255c; color: #fff; border-color: #c2255c; }
   td.maec { background: #ffe3e3; color: #c92a2a; font-weight: 700; }
@@ -659,7 +661,8 @@ async function drawCardTab(v, race) {
   const meta = [
     race.deadline ? `締切 ${race.deadline}` : "",
     race.distance ? `${race.distance}m` : "",
-  ].filter(Boolean).map((s) => `<span>${s}</span>`).join("");
+  ].filter(Boolean).map((s) => `<span>${s}</span>`).join("")
+    + (v.day || v.final ? `<button class="daylink" id="dayNav">${v.final ? "最終日" : v.day === 1 ? "初日" : v.day + "日目"} ▾</button>` : "");
 
   const E = race.entries;
   const sh = files.map((f) => f?.sheet?.all);
@@ -712,6 +715,7 @@ async function drawCardTab(v, race) {
     <div class="card">
       <h2>${esc(v.name)} ${race.no}R ${esc(race.name || "")}</h2>
       <div class="meta">${meta}</div>
+      <div id="dayNavBox" hidden></div>
       <div class="tbl"><table class="grid2">
         <thead><tr><th>枠</th><th>選手</th><th>平均ST<br><small>コース別</small></th><th>F<br>L</th>
           <th>全国勝率<br><small>2連率</small></th><th>当地勝率<br><small>2連率</small></th>
@@ -722,6 +726,40 @@ async function drawCardTab(v, race) {
       <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。F・Lは直近1年の回数。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
     </div>
 `;
+  const dn = $("dayNav");
+  if (dn) dn.onclick = () => toggleDayNav(v);
+}
+
+// ---------------------------------------------------------------- 節の日にち移動(出走表の「○日目」をタップ)
+async function meetDays(v) {
+  const venue = state.venue, base = state.date, have = new Set(dayList());
+  const shift = (ds, k) => { const [y, m, d] = ds.split("-").map(Number); return new Date(Date.UTC(y, m - 1, d + k)).toISOString().slice(0, 10); };
+  const out = [{ date: base, v }];
+  for (const dir of [-1, 1]) {
+    for (let k = 1; k <= 9; k++) {
+      const ds = shift(base, dir * k);
+      if (!have.has(ds)) break;
+      const day = await cached(`data/races/${ds.slice(0, 4)}/${ds.replace(/-/g, "")}.json`);
+      const vv = day?.venues?.[venue];
+      if (!vv || (v.title && vv.title !== v.title)) break;
+      out.push({ date: ds, v: vv });
+      if (dir > 0 && vv.final) break;
+      if (dir < 0 && vv.day === 1) break;
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+async function toggleDayNav(v) {
+  const box = $("dayNavBox");
+  if (!box) return;
+  if (!box.hidden) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = '<div class="note">読み込み中…</div>';
+  const days = await meetDays(v);
+  const label = (x) => x.v.final ? "最終日" : x.v.day === 1 ? "初日" : x.v.day ? `${x.v.day}日目` : "";
+  box.innerHTML = `<div class="note">${esc(v.title || "")}</div><div class="seg daynav">${days.map((x) =>
+    `<button data-date="${x.date}" class="${x.date === state.date ? "on" : ""}">${label(x)}<br><small>${x.date.slice(5).replace("-", "/")}</small></button>`).join("")}</div>`;
+  box.querySelectorAll("[data-date]").forEach((b) => b.onclick = () => { if (b.dataset.date !== state.date) loadDay(b.dataset.date); });
 }
 
 // ---------------------------------------------------------------- 今節成績
