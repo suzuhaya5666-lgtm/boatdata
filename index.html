@@ -785,8 +785,17 @@ async function drawCardTab(v, race) {
   const mdays = meetDaysOf(meet);
   const fd = (await cached("data/stats/fdelta.json").catch(() => null))?.delta;
   // F持ちのときの平均ST(このレースのコース)。本数が少なければ、ふだんの平均 + F持ちで遅くなる平均量 で「想定」
+  // 前の期のF: 期が変わるとF数は0に戻るが、F休みまでは少し慎重(全選手3年分: 期の1〜2か月目 F1 +.006・F2 +.019、3〜4か月目 +.003・+.013、5〜6か月目 0・+.008)
+  const PREVF = { 1: [0.006, 0.003, 0], 2: [0.019, 0.013, 0.008] };
+  const [, pm] = state.date.split("-").map(Number);
+  const mi = pm >= 11 ? pm - 11 : pm <= 4 ? pm + 1 : pm - 5;  // 期(11〜4月・5〜10月)の何か月目(0〜5)
   const fLine = (i, e) => {
     const fs = files[i]?.fst, c = String(e.course || e.boat);
+    if (fs && !fs.f && fs.fp) {
+      const add = PREVF[Math.min(fs.fp, 2)][Math.min(2, Math.floor(mi / 2))];
+      const base = fs.st?.[c]?.n?.[0] ?? stCourse[i] ?? stAvg[i];
+      return add && base != null ? `<div class="v sub fst">前期F 想定 ${fst(base + add)}</div>` : `<div class="v sub fst">前期F${fs.fp}</div>`;
+    }
     if (!fs?.f) return "";
     const k = fs.f >= 2 ? "f2" : "f1", d = fs.st?.[c] || {};
     if (d[k] && d[k][1] >= 5) return `<div class="v sub fst">F持ち ${fst(d[k][0])}<small class="cnt">(${d[k][1]})</small></div>`;
@@ -804,7 +813,7 @@ async function drawCardTab(v, race) {
         ${e.class ? `<br><span class="cls ${e.class}">${e.class}</span>` : ""}
         <br><small>${e.regno || ""} ${esc(e.branch || "")} ${e.age ? e.age + "歳" : ""}${e.weight ? ` ${e.weight}kg` : ""}</small></td>
       <td>${two(fst(stAvg[i]), col.stAvg[i], `${e.course || e.boat}コ ${fst(stCourse[i])}<small class="cnt">(${stCourseN[i]})</small>`, col.stCourse[i])}${fLine(i, e)}</td>
-      <td>${two(`<span class="${f ? "red" : ""}">F${f}</span>`, "", `<span class="${l ? "red" : ""}">L${l}</span>`, "")}</td>
+      <td>${two(`<span class="${f ? "red" : ""}">F${f}</span>${files[i]?.fst ? `<br><small class="${files[i].fst.f ? "red" : "cnt"}">今期${files[i].fst.f}</small>` : ""}`, "", `<span class="${l ? "red" : ""}">L${l}</span>`, "")}</td>
       <td>${two(fmt(e.nat_win), col.natWin[i], `${fmt(e.nat_2, 1)}%`, col.nat2[i])}</td>
       <td>${two(fmt(e.loc_win), col.locWin[i], `${fmt(e.loc_2, 1)}%`, col.loc2[i])}</td>
       <td>${two(`<small>No.</small>${e.motor_no ?? "-"}`, "", `${fmt(e.motor_2, 1)}%`, col.motor2[i])}</td>
@@ -836,7 +845,7 @@ async function drawCardTab(v, race) {
           ${hasResult ? "<th>展示<br><small>進入</small></th><th>ST<br><small>着順</small></th>" : ""}</tr></thead>
         <tbody>${rows}</tbody>
       </table></div>
-      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。F・Lは直近1年の回数。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
+      <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。F・Lは直近1年の回数（下の小さい数字は今の期(11〜4月・5〜10月)のF数）。平均STの赤字は、今の期にF持ちならF持ち中の平均(5本未満は想定)、前の期だけFなら「前期F 想定」。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
     </div>
 `;
   const dn = $("dayNav");

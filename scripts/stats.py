@@ -225,6 +225,8 @@ def f_state(recs, today):
             fcnt[f_period(date)] += 1
     st = {str(c): {k: [round(x[0] / x[1], 4), x[1]] for k, x in d.items() if x[1]} for c, d in byc.items()}
     f = fcnt[f_period(today)]
+    tp = f_period(today)
+    fp = fcnt[(tp[0], 1) if tp[1] == 2 else (tp[0] - 1, 2)]  # 前の期のF(F休みの前は、まだ慎重になりがち)
     normal = n[0] / n[1] if n[1] else None
     if f == 0:
         adj = normal
@@ -232,7 +234,7 @@ def f_state(recs, today):
         adj = fs[0] / fs[1]
     else:
         adj = normal + FDELTA[min(f, 2)] if normal is not None else None
-    return {"f": f, "st_adj": round(adj, 4) if adj is not None else None, "st": st}
+    return {"f": f, "fp": fp, "st_adj": round(adj, 4) if adj is not None else None, "st": st}
 
 
 KM3 = ("差し", "まくり", "まくり差し")
