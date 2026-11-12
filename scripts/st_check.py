@@ -9,6 +9,7 @@
   + 初日の展示遅(展示.40以上 +.01)。3日目以降のF持ちで、F持ち中の実績が5本以上ならその平均。
 fdelta は data/stats/fdelta.json(stats.py で作る)。なければ F持ちの遅れは 0 で計算する。
 実際のSTは F・出遅れ・欠場を除く。表は Markdown で出す。
+比較用に「補正0.5倍」(初日/2日目の遅れの補正を半分にした想定)の列も出す。
 """
 import collections
 import datetime as dt
@@ -26,6 +27,7 @@ VENUES = ("07", "08", "11", "12", "19")
 LOCALB = {"07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "19": "山口"}
 PREVF = {1: [0.006, 0.003, 0], 2: [0.019, 0.013, 0.008]}
 EXLATE = [(0.40, 0.010)]
+HALF = 0.5  # 比較用の列: 遅れの補正(stdelay)をこの倍率にした想定
 DIRS = ["北", "北東", "東", "南東", "南", "南西", "西", "北西"]
 SLOTNAME = {"s1": "初日1走目", "s2": "初日2走目", "s3": "2日目", "s4": "3日目以降"}
 
@@ -139,9 +141,10 @@ def main():
                         elif prevf:
                             label = "前期F" if slot == "s4" else label + "・前期F"
                         pred = base + fadd + prevf + delay + exadd
-                        rows.append((label, slot, code, pred, base, stv, status))
+                        # 比較用: 初日/2日目の遅れの補正を半分にした想定(遅れの予想は当たりが弱く、控えめの方が良い可能性)
+                        rows.append((label, slot, code, pred, base, stv, status, pred - delay * (1 - HALF)))
                 if pred is not None and label == "F持ち(実績)":
-                    rows.append((label, slot, code, pred, pred, stv, status))
+                    rows.append((label, slot, code, pred, pred, stv, status, pred))
             # 記録を進める
             if stv is not None:
                 if fc:
@@ -164,8 +167,8 @@ def main():
     fl = sum(1 for x in rows if (x[6] or "").startswith("F"))
     print(f"## 想定STと実際のST {y}年{m}月(5場)\n")
     print(f"対象 {len(rows)}走(うち実際のSTがあるもの {len(ok)}走、本番F {fl}走)。単位は1/1000秒。ずれは＋なら実際が想定より遅い。\n")
-    print("| 区分 | 走数 | 想定の平均誤差 | ずれ | ふだんの平均だけの誤差 | ずれ |")
-    print("|---|---|---|---|---|---|")
+    print("| 区分 | 走数 | 想定の平均誤差 | ずれ | 補正0.5倍の誤差 | ずれ | ふだんの平均だけの誤差 | ずれ |")
+    print("|---|---|---|---|---|---|---|---|")
 
     def line(name, xs):
         if not xs:
@@ -174,8 +177,11 @@ def main():
         b1 = sum(x[5] - x[3] for x in xs) / len(xs) * 1000
         e0 = sum(abs(x[5] - x[4]) for x in xs) / len(xs) * 1000
         b0 = sum(x[5] - x[4] for x in xs) / len(xs) * 1000
+        eh = sum(abs(x[5] - x[7]) for x in xs) / len(xs) * 1000
+        bh = sum(x[5] - x[7] for x in xs) / len(xs) * 1000
         same = all(x[0] == "F持ち(実績)" for x in xs)  # 実績そのものが想定なので比べる元がない
-        print(f"| {name} | {len(xs)} | {e1:.1f} | {b1:+.1f} | {'-' if same else f'{e0:.1f}'} | {'-' if same else f'{b0:+.1f}'} |")
+        d = lambda v, f: "-" if same else format(v, f)  # noqa: E731
+        print(f"| {name} | {len(xs)} | {e1:.1f} | {b1:+.1f} | {d(eh, '.1f')} | {d(bh, '+.1f')} | {d(e0, '.1f')} | {d(b0, '+.1f')} |")
     line("全体", ok)
     for s in ("s1", "s2", "s3"):
         line(SLOTNAME[s], [x for x in ok if x[1] == s and "F持ち" not in x[0] and "前期F" not in x[0]])
@@ -183,12 +189,12 @@ def main():
     line("F持ち(平均+遅れ)", [x for x in ok if "F持ち" in x[0] and x[0] != "F持ち(実績)"])
     line("前期F", [x for x in ok if "前期F" in x[0]])
     line("初日の展示遅(.40以上)", [x for x in ok if "展示遅" in x[0]])
-    print("\n| 場 | 走数 | 想定の平均誤差 | ずれ |")
-    print("|---|---|---|---|")
+    print("\n| 場 | 走数 | 想定の平均誤差 | ずれ | 補正0.5倍の誤差 | ずれ |")
+    print("|---|---|---|---|---|---|")
     for code in VENUES:
         xs = [x for x in ok if x[2] == code]
         if xs:
-            print(f"| {code} | {len(xs)} | {sum(abs(x[5] - x[3]) for x in xs) / len(xs) * 1000:.1f} | {sum(x[5] - x[3] for x in xs) / len(xs) * 1000:+.1f} |")
+            print(f"| {code} | {len(xs)} | {sum(abs(x[5] - x[3]) for x in xs) / len(xs) * 1000:.1f} | {sum(x[5] - x[3] for x in xs) / len(xs) * 1000:+.1f} | {sum(abs(x[5] - x[7]) for x in xs) / len(xs) * 1000:.1f} | {sum(x[5] - x[7] for x in xs) / len(xs) * 1000:+.1f} |")
 
 
 if __name__ == "__main__":
