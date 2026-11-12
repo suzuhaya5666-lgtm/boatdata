@@ -257,6 +257,9 @@
   .pop { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; }
   .pop.over { background: #ffe3e3; color: #c92a2a; } .pop.fair { background: #f1f3f5; color: #495057; } .pop.under { background: #d3f9d8; color: #2b8a3e; }
   table.memo td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
+  .hot2t { font-size: 11px; margin-left: 1px; }
+  .warn2t { background: #fff4e6; border: 1px solid #ffc078; font-size: 13px; line-height: 1.6; }
+  .warn2t > div + div { margin-top: 4px; }
   .plus { color: #2b8a3e; font-weight: 700; } .minus { color: #e03131; font-weight: 700; }
   table.st34 td.c4, table.st34 th.c4 { background: #f3f8ff; }
   table.st34 td { text-align: center; }
@@ -1128,6 +1131,19 @@ const olo = (v) => Array.isArray(v) ? v[0] : v;  // 幅のあるオッズは下�
 const ofmt = (v) => v == null ? "-" : Array.isArray(v) ? `${v[0].toFixed(1)}-${v[1].toFixed(1)}` : v.toFixed(1);
 const keyOf = (t, boats) => ORDERED[t] ? boats.join("-") : [...boats].sort().join("=");
 const demeKey = (t, k) => k.replace(/=/g, "-");
+// 3連単の合成オッズ(1÷(1/オッズ)の合計)。オッズがない目があれば null
+function synOdds(od, keys) {
+  const os = keys.map((k) => olo(od?.["3t"]?.[k]));
+  return keys.length && os.every((o) => o > 0) ? 1 / os.reduce((a, o) => a + 1 / o, 0) : null;
+}
+// 2連単 a-b が、3連単 a-b-全(3着流し4点)の合成オッズより高いか
+function exBeats3t(od, k) {
+  const o2 = olo(od?.["2t"]?.[k]);
+  if (!(o2 > 0)) return false;
+  const [a, b] = k.split("-");
+  const syn = synOdds(od, ["1", "2", "3", "4", "5", "6"].filter((c) => c !== a && c !== b).map((c) => `${a}-${b}-${c}`));
+  return syn != null && o2 > syn;
+}
 
 // 買い目メモ(レースごとに端末に保存)
 function memoKey() { return `memo_${state.date}_${state.venue}_${state.race}`; }
@@ -1202,7 +1218,8 @@ async function drawOddsTab(v, race, force) {
   const sel = (t, k) => memoHas(t, k) ? "osel" : "";
   const cell = (t, k, extra = "") => {
     const val = oval(od, t, k);
-    return `<td class="oc ${sel(t, k)} ${extra}" data-t="${t}" data-k="${k}">${ofmt(val)}</td>`;
+    const hot = t === "2t" && exBeats3t(od, k) ? '<span class="hot2t">🔥</span>' : "";
+    return `<td class="oc ${sel(t, k)} ${extra}" data-t="${t}" data-k="${k}">${ofmt(val)}${hot}</td>`;
   };
   const B = [1, 2, 3, 4, 5, 6];
   const headBoats = B.map((b) => `<th class="k${b}">${b}.${esc(ents[b]?.name || "")}</th>`).join("");
@@ -1243,6 +1260,7 @@ async function drawOddsTab(v, race, force) {
         ${od["1t"] ? "" : '<div class="note">単勝・複勝のオッズは、締切20分前からの取り込み分にだけあります。</div>'}`;
     }
     body += '<div class="note">オッズをタップすると買い目メモに入ります（もう一度タップで外れます）。</div>';
+    if (state.otype === "2tf") body += '<div class="note">🔥 は、その2連単のオッズが、同じ1着・2着の3連単を3着流し（4点）で買ったときの合成オッズより高い目です。同じ金額なら2連単1点の方が払戻が多くなります。</div>';
   } else if (state.oview === "pop" || state.oview === "high") {
     body = types.map((t) => {
       const list = Object.entries(od[t] || {}).filter(([, val]) => olo(val) > 0)
@@ -1333,10 +1351,21 @@ function openMemo(v, race, od) {
   const sorted = [...list].sort((a, b) => state.memoSort === "odds" ? (odd(a) || 1e9) - (odd(b) || 1e9)
     : (a.t + a.k).localeCompare(b.t + b.k));
   const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  // 3連単を1着・2着でまとめ、その合成オッズより2連単の方が高ければ ⚠️
+  const grp = {};
+  list.filter((m) => m.t === "3t").forEach((m) => { const ab = m.k.split("-").slice(0, 2).join("-"); (grp[ab] = grp[ab] || []).push(m.k); });
+  const warns = Object.entries(grp).map(([ab, ks]) => {
+    const syn = synOdds(od, ks), o2 = olo(od?.["2t"]?.[ab]);
+    return syn != null && o2 > 0 && o2 > syn ? { ab, n: ks.length, syn, o2 } : null;
+  }).filter(Boolean).sort((a, b) => a.ab.localeCompare(b.ab));
+  const warnAB = new Set(warns.map((w) => w.ab));
+  const warnBox = warns.length ? `<div class="card warn2t">${warns.map((w) =>
+    `<div>⚠️ ${w.ab.split("-").map(Number).map(bb).join("-")} の3連単${w.n}点（合成 ${w.syn.toFixed(1)}倍）より、2連単 ${w.ab.split("-").map(Number).map(bb).join("-")}（${w.o2.toFixed(1)}倍）を買った方が払戻が多くなります</div>`).join("")}</div>` : "";
   const rows = sorted.map((m) => {
     const o = odd(m), pay = o ? Math.floor(o * m.amt) : null, pl = pay != null ? pay - total : null;
     const p = pr(m), fair = p ? 1 / p : null;
-    return `<tr><td>${m.k.split(/[-=]/).map(Number).map(bb).join(ORDERED[m.t] ? "-" : "=")}<br><small class="cnt">${ONAME[m.t]}</small></td>
+    const wn = m.t === "3t" && warnAB.has(m.k.split("-").slice(0, 2).join("-")) ? "⚠️" : "";
+    return `<tr><td>${m.k.split(/[-=]/).map(Number).map(bb).join(ORDERED[m.t] ? "-" : "=")}${wn}<br><small class="cnt">${ONAME[m.t]}</small></td>
       <td>${ofmt(od?.[m.t]?.[m.k])}</td>
       <td class="${o && fair && o > fair ? "val" : ""}">${fair ? fair.toFixed(1) : "-"}<br><small class="cnt">${p ? (p * 100).toFixed(1) + "%" : ""}</small></td>
       <td><input class="amt" type="number" min="0" step="1" value="${(m.amt || 0) / 100}" data-t="${m.t}" data-k="${m.k}"><small>00円</small></td>
@@ -1358,6 +1387,7 @@ function openMemo(v, race, od) {
       </div>
       <div class="note">合計 ${total.toLocaleString()}円・${list.length}点。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。目安オッズの合成は、出目確率から見た「これだけつけば五分」の倍率で、合成オッズの方が大きければ（緑）確率のわりに割に合う買い方です。</div>
     </div>
+    ${warnBox}
     <div class="orow"><div class="seg"><button class="pill2 ${state.memoSort === "boat" ? "on" : ""}" data-ms="boat">枠番順</button><button class="pill2 ${state.memoSort === "odds" ? "on" : ""}" data-ms="odds">オッズ順</button></div>
       <span class="cnt">${od?.time ? "オッズ " + esc(od.time) : "締切時オッズ"}</span></div>
     <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>目安オッズ<br><small>出目確率</small></th><th>購入金額</th><th>想定払戻<br>収支</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
