@@ -1824,7 +1824,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
   const ng = G.length;
   const gOf = {};
   G.forEach((g, gi) => g.forEach((i) => { gOf[i] = gi; }));
-  const mask = state.featMask ?? ((1 << (ng + 1)) - 1);
+  const mask = state.featMask ?? defaultMask(model);
   const combo = model.combos?.[mask] || { coef: model.coef, cbias: model.cbias };
   model = { ...model, coef: combo.coef, cbias: combo.cbias };
   const ORGK = ["lap", "turn", "straight"];
@@ -1860,7 +1860,31 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     if (f === "class") return CLS_NUM[e.class] ?? null;
     if (f === "avg_st") return racers[b]?.fst?.st_adj ?? racers[b]?.sheet?.all?.st?.total?.avg ?? null;  // F持ちならF持ち時の平均ST
     if (f === "f_cnt") return racers[b]?.fst?.f ?? 0;
+    if (f.startsWith("slit_")) {  // 予報スリット: 想定STの両隣との差(＋は遅い)
+      const g = slitGaps();
+      if (!g) return null;
+      const i = k - 1;
+      return f === "slit_own" ? g[i] : f === "slit_late" ? Math.max(g[i], 0) : f === "slit_out" ? (k < 6 ? g[i + 1] : 0) : (k > 1 ? g[i - 1] : 0);
+    }
     return e[f] ?? null;
+  };
+  // 予報スリット用の想定ST(scripts/model.py の slit_st と同じ): F持ちでないときのそのコースの平均ST。
+  // F持ちなら、F持ち中のそのコースの実績5本以上はその平均、なければ +Fの遅れ。コースの本数が3本未満なら全体の平均ST
+  let slitCache;
+  const slitGaps = () => {
+    if (slitCache !== undefined) return slitCache;
+    const FD = model.slit_fdelta || { 1: 0.018, 2: 0.061 };
+    const st = [1, 2, 3, 4, 5, 6].map((k) => {
+      const fs = racers[order[k]]?.fst;
+      if (!fs) return null;
+      const fc = fs.f || 0, d = fs.st?.[String(k)] || {};
+      if (fc && d[fc >= 2 ? "f2" : "f1"]?.[1] >= 5) return d[fc >= 2 ? "f2" : "f1"][0];
+      if (d.n?.[1] >= 3) return d.n[0] + (fc ? FD[Math.min(fc, 2)] : 0);
+      return fs.st_adj ?? null;
+    });
+    slitCache = st.some((x) => x == null) ? null
+      : st.map((x, i) => x - [i - 1, i + 1].filter((j) => j >= 0 && j < 6).reduce((a, j, _, arr) => a + st[j] / arr.length, 0));
+    return slitCache;
   };
   const used = [];
   const Z = {};
@@ -1971,6 +1995,10 @@ function kimCardHtml(pred, vname) {
   return `<div class="card"><h2>予想決まり手</h2>
     <div class="tbl"><table class="cmp"><thead><tr><th>決まり手</th><th>${esc(vname)}の平均</th><th>このレース</th><th>差</th></tr></thead><tbody>${rows}</tbody></table></div>
     <div class="note">場の平均の決まり手に、各艇の展示タイム・平均ST・決まり手率（3年分）${state.venue === "07" ? "・オリジナル展示" : ""}の差を足して予想しています。平均の1.3倍以上は赤、0.75倍以下は青。検証では、平均だけより決まり手がはっきり当たるようになりました（出目確率そのものには入れていません）。</div></div>`;
+}
+// ふだん使う材料の組み合わせ(予報スリットなど、選んだときだけ使う材料を除く)。古い重みファイルは全部
+function defaultMask(model) {
+  return model.default_mask ?? (1 << (featGroups(model).length + 1)) - 1;
 }
 // 材料のまとまり(オン・オフの単位)。古い重みファイルは材料1つずつ
 function featGroups(model) {
@@ -2223,7 +2251,7 @@ async function drawDemeTab(v, race, keepPos) {
         そのうえで、${(model.feature_names || []).join("・")}をレース内で比べた差を、着ごとの係数で足しています（係数も毎月作り直し）。展示前は展示タイムを使わずに計算し、展示が取れたら自動で入ります。
         オリジナル展示（一周・まわり足・直線、今は蒲郡のみ）は、コースごとの平均との差で比べています（内側ほど速く測られる分を除くため）。平均STは、F持ちの選手はF持ちのときの平均ST（本数が少なければ普段の平均＋F1本0.018秒・F2本以上0.061秒）を使い、今の期のFの数も材料に入れています。
         「コース補正」は場ごとのコース別の補正で、SG・G1のときはイン有利の分（全場共通）を、さらにレースの種別（予選・準優・優勝戦・選抜/特選）ごとの補正（全場共通）を上乗せしています。係数を決めるのには、前付けのない（枠なりの）レースだけを使っています。</div>
-      ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? ((1 << (featGroups(model).length + 1)) - 1)] || {}) }, race)}
+      ${coefTable({ ...model, ...(model.combos?.[state.featMask ?? defaultMask(model)] || {}) }, race)}
       <div class="tbl">${weightTable(model)}</div>
     </div>`;
   if (keepY != null) window.scrollTo(0, keepY);
@@ -2244,7 +2272,7 @@ async function drawDemeTab(v, race, keepPos) {
   });
   document.querySelectorAll("#feats [data-f]").forEach((b) => b.onclick = () => {
     const ng = featGroups(model).length;
-    const cur = state.featMask ?? ((1 << (ng + 1)) - 1);
+    const cur = state.featMask ?? defaultMask(model);
     state.featMask = cur ^ (1 << Number(b.dataset.f));
     drawDemeTab(v, race, true);
   });
@@ -2337,19 +2365,19 @@ function openBuff(adj, order, ents, b) {
 
 function featCard(model, adj) {
   if (!model.combos) return "";
-  const ng = featGroups(model).length;
-  const all = (1 << (ng + 1)) - 1;
-  const mask = state.featMask ?? all;
+  const def = defaultMask(model);
+  const mask = state.featMask ?? def;
   const names = [...(model.group_names || model.feature_names), "コース補正"];
-  const chips = names.map((nm, i) => `<button class="pill2 ${mask >> i & 1 ? "on" : ""}" data-f="${i}">${nm}</button>`).join("");
+  const chips = names.map((nm, i) => `<button class="pill2 ${mask >> i & 1 ? "on" : ""}" data-f="${i}">${nm}${def >> i & 1 ? "" : "<small>（選んだときだけ）</small>"}</button>`).join("");
   const ev = adj.ev;
-  const best = model.combos[all].eval;
+  const best = model.combos[def].eval;
+  const extra = names.filter((_, i) => !(def >> i & 1));
   return `<div class="card"><h2>計算に使う材料</h2>
     <div class="seg" id="feats">${chips}</div>
     ${ev ? `<div class="meta"><span>この組み合わせの検証（過去${model.eval_races.toLocaleString()}レース）:</span>
       <span>3連単上位10点 <b>${ev.tri10}%</b></span><span>2連単上位3点 <b>${ev.ex3}%</b></span><span>単勝 <b>${ev.tan}%</b></span></div>` : ""}
-    <div class="note">コース別成績（自艇・他艇）はいつも使います。材料を外すと、残りの材料の係数を決め直したもので計算します。
-      ${mask !== all ? `全部使うと 3連単上位10点 ${best.tri10}%。<button class="pill2" id="featAll" style="margin-left:6px">全部に戻す</button>` : "今は全部使っています（いちばん当たる組み合わせ）。"}</div>
+    <div class="note">コース別成績（自艇・他艇）はいつも使います。材料を外すと、残りの材料の係数を決め直したもので計算します。${extra.length ? `「${extra.join("・")}」はふだんは使わず、選んだときだけ足します（予報スリットは、各艇の想定STの並びから、両隣より遅れそう・早そうかを見る材料。検証での改善は小さめ）。` : ""}
+      ${mask !== def ? `ふだんの組み合わせは 3連単上位10点 ${best.tri10}%。<button class="pill2" id="featAll" style="margin-left:6px">ふだんに戻す</button>` : "今はふだんの組み合わせです。"}</div>
   </div>`;
 }
 function coefTable(model, race) {

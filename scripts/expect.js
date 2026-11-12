@@ -19,7 +19,7 @@ function pick(name) {
   return html.slice(start, html.indexOf("\n", e + 1));
 }
 var state = {};
-eval(["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "raceKind", "biasFor", "demeTri"].map(pick).join("\n").replace(/^const /gm, "var "));
+eval(["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "defaultMask", "raceKind", "biasFor", "demeTri"].map(pick).join("\n").replace(/^const /gm, "var "));
 
 const day = process.argv[2];
 const dayData = J(`data/races/${day.slice(0, 4)}/${day}.json`);

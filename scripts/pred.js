@@ -20,7 +20,7 @@ function pick(name) {
   const e = html.indexOf("\n}", start);
   return html.slice(start, html.indexOf("\n", e + 1));
 }
-const NAMES = ["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "raceKind", "biasFor", "demeTri", "ARE", "WIND", "areWind", "areOf"];
+const NAMES = ["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "defaultMask", "raceKind", "biasFor", "demeTri", "ARE", "WIND", "areWind", "areOf"];
 const src = NAMES.map(pick).join("\n");
 var state = {};
 eval(src.replace(/^const /gm, "var "));

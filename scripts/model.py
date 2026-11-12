@@ -29,12 +29,19 @@ M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走�
 WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
 FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu",
-            "ex_st", "parts", "tilt", "motor_form", "local", "form", "form_young"]
+            "ex_st", "parts", "tilt", "motor_form", "local", "form", "form_young",
+            "slit_own", "slit_late", "slit_out", "slit_in"]
 FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績",
-                 "展示ST", "部品交換", "チルト", "モーターの調子", "地元", "直近の調子", "直近の調子(若手)"]
+                 "展示ST", "部品交換", "チルト", "モーターの調子", "地元", "直近の調子", "直近の調子(若手)",
+                 "予報スリット(自艇)", "予報スリット(自艇の遅れ)", "予報スリット(外隣)", "予報スリット(内隣)"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
-GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4], [5], [6], [7, 8, 9], [10, 14, 16, 17]]
-GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・調子"]
+GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4], [5], [6], [7, 8, 9], [10, 14, 16, 17], [18, 19, 20, 21]]
+GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・調子",
+               "予報スリット"]
+# 予報スリット: 各艇の想定ST(F持ちでないときのそのコースの平均ST。F持ちならF持ち中の実績5本以上はその平均、なければ+FDELTA)から、
+# 両隣の平均との差(＋は遅い)を自艇・自艇の遅れ側(0未満は0)・外隣・内隣の4つにする。検証で改善が小さいので、ふだんは使わない(画面で選べる)
+SLIT_GROUP = len(GROUPS) - 1
+DEFAULT_OFF = [SLIT_GROUP]
 ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、今は蒲郡のみ)。コースの平均を引いて、速いほど大きくして使う
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
 SETSU_K = 6      # 節間成績: 走数が少ないときに0(平均)へ寄せる強さ。値 = 平均 × n/(n+6)
@@ -108,6 +115,32 @@ def program_entries(day, code, no):
     return _days[key]["venues"].get(code, {}).get("races", {}).get(str(no), {}).get("entries", [])
 
 
+def slit_st(regno, k, fc, stN, stF, stNc, stFc):
+    """予報スリット用の想定ST(画面の slitST と同じ作り方)。"""
+    if fc:
+        a = stFc[(regno, k, min(fc, 2))]
+        if a[1] >= 5:
+            return a[0] / a[1]
+    a = stNc[(regno, k)]
+    if a[1] >= 3:
+        return a[0] / a[1] + (FDELTA[min(fc, 2)] if fc else 0)
+    n_, f_ = stN[regno], stF[regno]
+    normal = n_[0] / n_[1] if n_[1] else np.nan
+    return normal if fc == 0 else (f_[0] / f_[1] if f_[1] >= 5 else normal + FDELTA[min(fc, 2)])
+
+
+def slit_feats(st):
+    """6コースの想定ST → 各コースの [自艇の差, 自艇の遅れ側, 外隣の差, 内隣の差](差=両隣の平均との差、＋は遅い)。"""
+    st = np.array(st, float)
+    out = np.full((7, 4), np.nan)
+    if np.isnan(st).any():
+        return out[:, :4]
+    g = [st[k] - np.mean([st[j] for j in (k - 1, k + 1) if 0 <= j < 6]) for k in range(6)]
+    for k in range(6):
+        out[k + 1] = [g[k], max(g[k], 0.0), g[k + 1] if k < 5 else 0.0, g[k - 1] if k > 0 else 0.0]
+    return out
+
+
 def build():
     races = sorted(((d, c, r, [e for e in r["entries"].values() if started(e)]) for d, c, r in load_races()),
                    key=lambda x: x[0])
@@ -117,6 +150,8 @@ def build():
     venue = collections.defaultdict(lambda: np.zeros((7, 4)))
     stN = collections.defaultdict(lambda: np.zeros(2))  # F持ちでないときのST
     stF = collections.defaultdict(lambda: np.zeros(2))  # F持ちのときのST
+    stNc = collections.defaultdict(lambda: np.zeros(2))  # (選手, コース) F持ちでないときのST(予報スリット用)
+    stFc = collections.defaultdict(lambda: np.zeros(2))  # (選手, コース, 1/2) F持ちのときのST
     fcnt = collections.Counter()                        # (選手, 期) -> F数
     grades = load_grades()
     by_day = collections.defaultdict(list)
@@ -180,7 +215,9 @@ def build():
                             CLS.get(b.get("class"), np.nan), adj, fc] + \
                         [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")] + \
                         [setsu_value(srec, code, e["regno"], day)] + before_feats(day, code, race["no"], e["boat"]) + [np.nan] + \
-                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0] + [np.nan, np.nan]
+                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0] + [np.nan, np.nan] + [np.nan] * 4
+                f[:, 18:22] = slit_feats([slit_st(courses[k]["regno"], k, fcnt[(courses[k]["regno"], f_period(day))], stN, stF, stNc, stFc)
+                                          for k in range(1, 7)])
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
                 ROWMETA.append((code, day, int(race["no"]), {k: courses[k]["regno"] for k in range(1, 7)},
                                 {k: courses[k].get("motor_no") for k in range(1, 7)}))
@@ -204,7 +241,12 @@ def build():
                     RESULTS.append((code, e["regno"], day, int(race["no"]), c, p or 6, e.get("motor_no")))
                 s = selfc[e["regno"]][c]
                 if re.match(r"^\d?\.\d+$", e.get("st") or ""):
-                    (stF if fcnt[(e["regno"], f_period(day))] else stN)[e["regno"]] += [float(e["st"]), 1]
+                    fc_ = fcnt[(e["regno"], f_period(day))]
+                    (stF if fc_ else stN)[e["regno"]] += [float(e["st"]), 1]
+                    if fc_:
+                        stFc[(e["regno"], c, min(fc_, 2))] += [float(e["st"]), 1]
+                    else:
+                        stNc[(e["regno"], c)] += [float(e["st"]), 1]
                 s[0] += 1
                 if p in (1, 2, 3):
                     s[p] += 1
@@ -672,7 +714,7 @@ def main():
     # 節間成績は「予想との差」で測る: いったん節間成績なしで予想を作り、その予想の着順と実際の差から作り直す
     SI, MI = FEATURES.index("setsu"), FEATURES.index("motor_form")
     FI = [FEATURES.index("form"), FEATURES.index("form_young")]
-    feats0 = [i for i in range(len(FEATURES)) if i not in (SI, MI, *FI)]
+    feats0 = [i for i in range(len(FEATURES)) if i not in (SI, MI, *FI, *GROUPS[SLIT_GROUP])]
     c0, b0 = fit_logit(LQ, Z, Y, V, S, KD, feats0, True, rows=prog)
     E = {}
     for st in range(0, len(prog), 4000):
@@ -707,7 +749,10 @@ def main():
         c_all, b_all = fit_logit(LQ, Z, Y, V, S, KD, feats, use_cb, rows=prog)
         combos[str(mask)] = {"coef": c_all, "cbias": b_all, "eval": ev}
         print(f"組み合わせ {mask:3d}: {ev}")
-    full = combos[str((1 << (ng + 1)) - 1)]
+    default_mask = (1 << (ng + 1)) - 1
+    for g in DEFAULT_OFF:
+        default_mask &= ~(1 << g)
+    full = combos[str(default_mask)]
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"month": f"{today:%Y-%m}", "m": M, "races": int(len(Y)),
@@ -717,7 +762,8 @@ def main():
                    "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
                    "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect", "motor_days": MOTOR_DAYS, "motor_k": MOTOR_K, "local_branch": LOCAL_BRANCH,
                    "form_days": FORM_DAYS, "form_days_default": FORM_DAYS_DEFAULT, "form_k": {str(k): v for k, v in FORM_K.items()}, "debut_ref": DEBUT_REF,
-                   "setsu_base_mask": (1 << (len(GROUPS) + 1)) - 1 - (1 << len(GROUPS) - 1),
+                   "setsu_base_mask": default_mask & ~(1 << GROUP_NAMES.index("節間成績・調子")),
+                   "default_mask": default_mask, "slit_fdelta": FDELTA,
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
     kim = kim_models(Z, KR, KY, V, prog)
