@@ -39,6 +39,29 @@ def org_of(day, code, no):
 
 
 _expect = {}
+_dayres = {}
+
+
+def day_results(day, cm_all):
+    """その日の5場の各選手の(着順 − 予想の着順)。予想がなければコース平均との差。"""
+    if day not in _dayres:
+        out = {}
+        ex = None
+        for code in ("07", "08", "11", "12", "19"):
+            pv = races_of(day, code)
+            if not pv or not cm_all.get(code):
+                continue
+            if ex is None:
+                ex = expect_of(day)
+            for r in pv.get("races", {}).values():
+                for e in r.get("entries", []):
+                    c = e.get("course") or e.get("boat")
+                    if not 1 <= c <= 6 or (e.get("place") is None and not e.get("status")) or (e.get("status") or "").startswith("K"):
+                        continue
+                    ev = (ex.get(f"{code}_{int(r.get('no')):02d}") or {}).get(str(e.get("boat")))
+                    out.setdefault(e.get("regno"), []).append((e.get("place") or 6) - (ev if ev is not None else cm_all[code][c]))
+        _dayres[day] = out
+    return _dayres[day]
 
 
 def expect_of(day):
@@ -127,6 +150,21 @@ def build(day, code):
                     ev = (ex.get(f"{code}_{int(r.get('no')):02d}") or {}).get(str(e.get("boat")))
                     acc.setdefault(e["motor_no"], []).append((e.get("place") or 6) - (ev if ev is not None else cm[c]))
         motors = {str(m): round(sum(x) / len(x) * len(x) / (len(x) + mk), 4) for m, x in acc.items()}
+    # 直近の調子: 5場の直近N日(蒲郡180日・ほか365日)の(着順 − 予想の着順)の平均を走数で寄せる。model.py と同じ
+    fdays = (w.get("form_days") or {}).get(code, w.get("form_days_default"))
+    if fdays and w.get("setsu_cm"):
+        fk = (w.get("form_k") or {}).get(str(fdays), 20)
+        today_rg = {e.get("regno") for r in v.get("races", {}).values() for e in r.get("entries", [])}
+        acc = {rg: [] for rg in today_rg}
+        for back in range(1, fdays + 1):
+            dr = day_results(day - dt.timedelta(days=back), w["setsu_cm"])
+            for rg in today_rg:
+                if rg in dr:
+                    acc[rg] += dr[rg]
+        for rg, xs in acc.items():
+            if xs:
+                racers.setdefault(rg, {})["form"] = round(sum(xs) / len(xs) * len(xs) / (len(xs) + fk), 4)
+                racers[rg]["form_n"] = len(xs)
     return {"day": n, "title": v.get("title"), "racers": racers, "motors": motors}
 
 

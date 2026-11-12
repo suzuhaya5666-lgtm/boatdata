@@ -29,19 +29,32 @@ M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走�
 WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
 FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu",
-            "ex_st", "parts", "tilt", "motor_form", "local"]
+            "ex_st", "parts", "tilt", "motor_form", "local", "form", "form_young"]
 FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績",
-                 "展示ST", "部品交換", "チルト", "モーターの調子", "地元"]
+                 "展示ST", "部品交換", "チルト", "モーターの調子", "地元", "直近の調子", "直近の調子(若手)"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
-GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4], [5], [6], [7, 8, 9], [10, 14]]
-GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・モーターの調子"]
+GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4], [5], [6], [7, 8, 9], [10, 14, 16, 17]]
+GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・調子"]
 ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、今は蒲郡のみ)。コースの平均を引いて、速いほど大きくして使う
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
 SETSU_K = 6      # 節間成績: 走数が少ないときに0(平均)へ寄せる強さ。値 = 平均 × n/(n+6)
 SETSU_CM = {}    # 場×コースの平均着順(予想がないレースの節間成績に使う。画面にも渡す)
 ROWMETA = []     # 学習に使う各レース: (場, 日, R, {コース: 登番}, {コース: モーター番号})
 LOCAL_BRANCH = {"07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "19": "山口"}  # 地元の支部
-MOTOR_DAYS, MOTOR_K = 90, 12   # モーターの調子: 直近90日のその場での(着順 − 予想の着順)の平均を走数で寄せる
+MOTOR_DAYS, MOTOR_K = 90, 12
+FORM_DAYS = {"07": 180}        # 直近の調子: 5場の直近N日の(着順 − 予想の着順)の平均。蒲郡は180日、ほかは365日
+FORM_DAYS_DEFAULT = 365
+FORM_K = {180: 15, 365: 20}    # 走数で0に寄せる強さ
+DEBUT_REF = [5496, 2026.87, 52.0]  # デビューの目安: 登番5496が2026年11月、1年に約52番
+
+
+def debut_years(regno, day):
+    """デビューからの年数(登番からの推定)。"""
+    try:
+        r = int(regno)
+    except (TypeError, ValueError):
+        return 99.0
+    return (day.year + (day.timetuple().tm_yday - 1) / 365.0) - (DEBUT_REF[1] - (DEBUT_REF[0] - r) / DEBUT_REF[2])   # モーターの調子: 直近90日のその場での(着順 − 予想の着順)の平均を走数で寄せる
 RESULTS = []     # 5場の全レースの着順: (場, 登番, 日, R, コース, 着順, モーター番号)
 
 
@@ -167,7 +180,7 @@ def build():
                             CLS.get(b.get("class"), np.nan), adj, fc] + \
                         [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")] + \
                         [setsu_value(srec, code, e["regno"], day)] + before_feats(day, code, race["no"], e["boat"]) + [np.nan] + \
-                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0]
+                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0] + [np.nan, np.nan]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
                 ROWMETA.append((code, day, int(race["no"]), {k: courses[k]["regno"] for k in range(1, 7)},
                                 {k: courses[k].get("motor_no") for k in range(1, 7)}))
@@ -431,6 +444,32 @@ def motor_by_expect(E):
     return out
 
 
+def form_by_expect(E):
+    """直近の調子と、その若手(デビュー5年以内)版。蒲郡は直近180日、ほかの場は365日。小さいほど好調。"""
+    import bisect
+    rec = collections.defaultdict(list)
+    for code, rg, day, no, c, pl, _ in RESULTS:
+        e = E.get((code, day, no, c))
+        rec[rg].append((day, pl - (e if e is not None else SETSU_CM[code][c])))
+    for v in rec.values():
+        v.sort(key=lambda x: x[0])
+    out = np.full((len(ROWMETA), 7, 2), np.nan)
+    for i, (code, day, no, regs, _) in enumerate(ROWMETA):
+        nd = FORM_DAYS.get(code, FORM_DAYS_DEFAULT)
+        for k in range(1, 7):
+            lst = rec.get(regs[k])
+            if not lst:
+                continue
+            ds = [d for d, _ in lst]
+            a, b = bisect.bisect_left(ds, day - dt.timedelta(days=nd)), bisect.bisect_left(ds, day)
+            xs = [x for _, x in lst[a:b]]
+            if xs:
+                f = float(np.mean(xs)) * len(xs) / (len(xs) + FORM_K[nd])
+                out[i, k, 0] = f
+                out[i, k, 1] = f if (code not in FORM_DAYS and debut_years(regs[k], day) < 5) else 0.0
+    return out
+
+
 def org_transform(F, V):
     """オリジナル展示: 場・コースごとの平均を引いて符号を逆に(速いほど大きく)。平均は画面でも使う。"""
     cm = {}
@@ -632,7 +671,8 @@ def main():
     LQ = base_lq(X, N, P, W)
     # 節間成績は「予想との差」で測る: いったん節間成績なしで予想を作り、その予想の着順と実際の差から作り直す
     SI, MI = FEATURES.index("setsu"), FEATURES.index("motor_form")
-    feats0 = [i for i in range(len(FEATURES)) if i not in (SI, MI)]
+    FI = [FEATURES.index("form"), FEATURES.index("form_young")]
+    feats0 = [i for i in range(len(FEATURES)) if i not in (SI, MI, *FI)]
     c0, b0 = fit_logit(LQ, Z, Y, V, S, KD, feats0, True, rows=prog)
     E = {}
     for st in range(0, len(prog), 4000):
@@ -645,6 +685,7 @@ def main():
                 E[(code, day, no, k)] = float(ex_place[r_, k])
     F[:, :, SI] = setsu_by_expect(E)
     F[:, :, MI] = motor_by_expect(E)
+    F[:, :, FI] = form_by_expect(E)
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", RuntimeWarning)
         Zp, sd = standardize(F[prog])
@@ -675,6 +716,7 @@ def main():
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
                    "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
                    "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect", "motor_days": MOTOR_DAYS, "motor_k": MOTOR_K, "local_branch": LOCAL_BRANCH,
+                   "form_days": FORM_DAYS, "form_days_default": FORM_DAYS_DEFAULT, "form_k": {str(k): v for k, v in FORM_K.items()}, "debut_ref": DEBUT_REF,
                    "setsu_base_mask": (1 << (len(GROUPS) + 1)) - 1 - (1 << len(GROUPS) - 1),
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))

@@ -1796,6 +1796,16 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
       return Number.isNaN(v) ? null : st.startsWith("F") ? -v : v;
     }
     if (f === "local") { const lb = model.local_branch?.[race?._v || state.venue]; return lb && e.branch ? (e.branch === lb ? 1 : 0) : null; }  // 地元の支部
+    if (f === "form" || f === "form_young") {  // 直近の調子(小さいほど好調)。若手版は蒲郡以外のデビュー5年以内だけ
+      const x = bi?.series?.racers?.[e.regno]?.form;
+      if (x == null) return null;
+      if (f === "form") return x;
+      const vc = race?._v || state.venue, ref = model.debut_ref;
+      if (!ref || model.form_days?.[vc]) return 0;
+      const [y, m, dd] = state.date.split("-").map(Number);
+      const yrs = y + (Date.UTC(y, m - 1, dd) - Date.UTC(y, 0, 1)) / 864e5 / 365 - (ref[1] - (ref[0] - Number(e.regno)) / ref[2]);
+      return yrs < 5 ? x : 0;
+    }
     if (f === "parts") return bi?.entries?.[b] ? (bi.entries[b].parts?.length ? 1 : 0) : null;
     if (f === "tilt") return bi?.entries?.[b]?.tilt ?? null;
     if (f === "class") return CLS_NUM[e.class] ?? null;
