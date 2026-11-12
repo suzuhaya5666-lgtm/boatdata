@@ -1171,7 +1171,9 @@ async function getBefore(hd, venue, no) {
 
 // 節間のまとめ(data/series): 節間成績(5場)と、蒲郡の節間平均の展示・オリ展(展示前だけ)。直前情報に series として添える
 async function withSeries(bi, hd, venue) {
-  const [sm, sr] = await Promise.all([cached("data/model/series.json"), cached(`data/series/${hd}/${venue}.json`)]);
+  const sp = `data/series/${hd}/${venue}.json`;  // 毎朝作るので、ページの公開を待たずリポジトリから直接読む
+  if (!(sp in cache)) cache[sp] = fetch(RAW + sp, { cache: "no-store" }).then((r) => (r.ok ? r.json() : getJSON(sp))).catch(() => getJSON(sp).catch(() => null));
+  const [sm, sr] = await Promise.all([cached("data/model/series.json"), cache[sp]]);
   if (!sr?.racers) return bi;
   return { ...(bi || {}), series: sr, seriesModel: sm?.[venue] };
 }

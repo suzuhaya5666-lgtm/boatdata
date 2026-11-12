@@ -38,6 +38,21 @@ def org_of(day, code, no):
     return p.get(f"{code}_{no:02d}") or {}
 
 
+_expect = {}
+
+
+def expect_of(day):
+    """その日の各艇の予想の着順。なければ expect.js で作る。"""
+    key = f"{day:%Y%m%d}"
+    if key not in _expect:
+        p = os.path.join(DATA, "expect", f"{key}.json")
+        if not os.path.exists(p):
+            import subprocess
+            subprocess.run(["node", os.path.join(os.path.dirname(os.path.abspath(__file__)), "expect.js"), key], timeout=600)
+        _expect[key] = load(p) or {}
+    return _expect[key]
+
+
 def build(day, code):
     v = races_of(day, code)
     if not v:
@@ -66,21 +81,25 @@ def build(day, code):
     for rg, a in acc.items():
         racers[rg] = {k: round(sum(x) / len(x), 4) for k, x in a.items() if x}
         racers[rg]["n"] = len(a["exh"])
-    # 節間成績(出目確率の材料): 前日までの(着順 − 場×コース平均着順)の平均を走数で0に寄せる。model.py と同じ
+    # 節間成績(出目確率の材料): 前日までの(着順 − 予想の着順)の平均を走数で0に寄せる。model.py と同じ。
+    # 予想の着順は data/expect(なければ expect.js で作る)。予想がないレースはコース平均の着順との差
     w = load(os.path.join(DATA, "model", "weights.json")) or {}
     cm, kk = (w.get("setsu_cm") or {}).get(code), w.get("setsu_k", 3)
     if cm:
         today = {e.get("regno") for r in v.get("races", {}).values() for e in r.get("entries", [])}
         hist = {}
         for back in range(1, 11):
-            pv = races_of(day - dt.timedelta(days=back), code)
+            pd = day - dt.timedelta(days=back)
+            pv = races_of(pd, code)
             hist[back] = {}
+            ex = expect_of(pd) if pv and w.get("setsu_mode") == "expect" else {}
             for r in (pv or {}).get("races", {}).values():
                 for e in r.get("entries", []):
                     c = e.get("course") or e.get("boat")
                     if e.get("place") is None and not e.get("status"):
                         continue  # 欠場・未確定
-                    hist[back].setdefault(e.get("regno"), []).append((e.get("place") or 6) - cm[c])
+                    ev = (ex.get(f"{code}_{int(r.get('no')):02d}") or {}).get(str(e.get("boat")))
+                    hist[back].setdefault(e.get("regno"), []).append((e.get("place") or 6) - (ev if ev is not None else cm[c]))
         for rg in today:
             vals = []
             for back in range(1, 11):

@@ -273,7 +273,7 @@ def push():
     """取れた分をすぐ GitHub に保存する(画面はリポジトリから直接読む)。"""
     def run(*a):
         return subprocess.run(list(a), capture_output=True, text=True)
-    paths = [p for p in (os.path.join(DATA, "before"), os.path.join(DATA, "live"), os.path.join(DATA, "pred"), os.path.join(DATA, "series")) if os.path.exists(p)]
+    paths = [p for p in (os.path.join(DATA, "before"), os.path.join(DATA, "live"), os.path.join(DATA, "pred"), os.path.join(DATA, "series"), os.path.join(DATA, "expect")) if os.path.exists(p)]
     if not paths:
         return
     run("git", "add", *paths)
