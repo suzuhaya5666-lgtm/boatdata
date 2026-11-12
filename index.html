@@ -1232,8 +1232,9 @@ function maeBadge(regno, boat) {
   const m = maeOf(regno);
   if (!m) return "";
   const b = m.by[boat];
+  // 前付けしやすい枠(その枠から20%以上・3走以上)にいるときだけ
   if (boat >= 2 && b && b.n >= 3 && b.p >= 0.2) return `<span class="mae on" title="${esc(m.type)}">前付${Math.round(b.p * 100)}%</span>`;
-  return `<span class="mae" title="${esc(m.type)}">前付</span>`;
+  return "";
 }
 function maeCard(regno) {
   const m = maeOf(regno), r = MAE[regno];
@@ -1254,7 +1255,8 @@ function maeCard(regno) {
     <div class="note">直近1年・全場で、その枠のときに何コースから出たか。赤は前付け(2〜4枠は枠より内、5・6枠は2つ以上内)。5枠→4コース・6枠→5コースは、内の艇がダッシュに出た場合も多いので前付けに数えていません。</div></div>`;
 }
 function maeNote(race, order) {
-  const xs = race.entries.map((e) => ({ e, m: maeOf(e.regno) })).filter((x) => x.m);
+  const xs = race.entries.map((e) => ({ e, m: maeOf(e.regno) }))
+    .filter((x) => x.m && x.e.boat >= 2 && x.m.by[x.e.boat].n >= 3 && x.m.by[x.e.boat].p >= 0.2);
   if (!xs.length) return "";
   return `<div class="note">${xs.map(({ e, m }) => {
     const b = m.by[e.boat];
