@@ -28,13 +28,33 @@ from collect import load_grades  # noqa: E402
 M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走分)
 WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
-FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight"]
-FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線"]
+FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu"]
+FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
-GROUPS = [[0], [1], [2], [3], [4], [5], [6], [7, 8, 9]]
-GROUP_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示"]
+GROUPS = [[0], [1], [2], [3], [4], [5], [6], [7, 8, 9], [10]]
+GROUP_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績"]
 ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、今は蒲郡のみ)。コースの平均を引いて、速いほど大きくして使う
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
+SETSU_K = 3      # 節間成績: 走数が少ないときに0(平均)へ寄せる強さ。値 = 平均 × n/(n+3)
+SETSU_CM = {}    # 場×コースの平均着順(節間成績のコース補正に使う。画面にも渡す)
+
+
+def setsu_value(srec, code, regno, day):
+    """節間成績: その節の前日までの(着順 − 場×コース平均着順)の平均を、走数で0に寄せた値。小さいほど好調。
+    節は「その場で続けて走った日」をさかのぼってまとめる。"""
+    vals = []
+    d = day - dt.timedelta(days=1)
+    for _ in range(10):
+        x = srec.get((code, regno, d))
+        if not x:
+            break
+        vals += x
+        d -= dt.timedelta(days=1)
+    if not vals:
+        return np.nan
+    return float(np.mean(vals)) * len(vals) / (len(vals) + SETSU_K)
+
+
 KINDS = ["予選", "準優", "優勝戦", "選抜・特選"]  # レースの種別(それ以外は補正なし)
 
 
@@ -83,6 +103,18 @@ def build():
     by_day = collections.defaultdict(list)
     for r in races:
         by_day[r[0]].append(r)
+    # 場×コースの平均着順(失格・転覆なども6着として数える)
+    cmc = collections.defaultdict(lambda: [0.0, 0])
+    for _, code, race, ents in races:
+        if code in VENUES:
+            for e in ents:
+                a = cmc[(code, e["course"])]
+                a[0] += e.get("place") or 6
+                a[1] += 1
+    SETSU_CM.clear()
+    for code in VENUES:
+        SETSU_CM[code] = [round(cmc[(code, c)][0] / cmc[(code, c)][1], 4) if cmc[(code, c)][1] else 3.5 for c in range(7)]
+    srec = collections.defaultdict(list)  # (場, 選手, 日) -> [着順 − コース平均]
     X, N, P, Y, F, H, V, S, KD = [], [], [], [], [], [], [], [], []
     KR, KY = [], []   # 決まり手率(1コース: 被差し・被まくり・被まくり差し、2〜6: 差し・まくり・まくり差し)と、実際の決まり手
     klost = collections.defaultdict(lambda: np.zeros(4))
@@ -125,7 +157,8 @@ def build():
                     f[k] = [e.get("exh") or np.nan, b.get("nat_win") or np.nan, b.get("loc_win") or np.nan,
                             b["motor_2"] if b.get("motor_2") is not None else np.nan,
                             CLS.get(b.get("class"), np.nan), adj, fc] + \
-                        [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")]
+                        [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")] + \
+                        [setsu_value(srec, code, e["regno"], day)]
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
                 H.append(any(e.get("nat_win") is not None for e in de.values()))  # 出走表(勝率など)があるレースか
                 V.append(VENUE_IDX[code])
@@ -142,6 +175,8 @@ def build():
         for _, code, race, ents in by_day[day]:
             for e in ents:
                 c, p = e["course"], e.get("place")
+                if code in SETSU_CM and 1 <= c <= 6:
+                    srec[(code, e["regno"], day)].append((p or 6) - SETSU_CM[code][c])
                 s = selfc[e["regno"]][c]
                 if re.match(r"^\d?\.\d+$", e.get("st") or ""):
                     (stF if fcnt[(e["regno"], f_period(day))] else stN)[e["regno"]] += [float(e["st"]), 1]
@@ -504,6 +539,7 @@ def main():
                    "W": np.round(W, 4).tolist(),
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
                    "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
+                   "setsu_cm": SETSU_CM, "setsu_k": SETSU_K,
                    "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
     kim = kim_models(Z, KR, KY, V, prog)

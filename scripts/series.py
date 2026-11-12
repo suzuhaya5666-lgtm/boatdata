@@ -66,12 +66,37 @@ def build(day, code):
     for rg, a in acc.items():
         racers[rg] = {k: round(sum(x) / len(x), 4) for k, x in a.items() if x}
         racers[rg]["n"] = len(a["exh"])
+    # 節間成績(出目確率の材料): 前日までの(着順 − 場×コース平均着順)の平均を走数で0に寄せる。model.py と同じ
+    w = load(os.path.join(DATA, "model", "weights.json")) or {}
+    cm, kk = (w.get("setsu_cm") or {}).get(code), w.get("setsu_k", 3)
+    if cm:
+        today = {e.get("regno") for r in v.get("races", {}).values() for e in r.get("entries", [])}
+        hist = {}
+        for back in range(1, 11):
+            pv = races_of(day - dt.timedelta(days=back), code)
+            hist[back] = {}
+            for r in (pv or {}).get("races", {}).values():
+                for e in r.get("entries", []):
+                    c = e.get("course") or e.get("boat")
+                    if e.get("place") is None and not e.get("status"):
+                        continue  # 欠場・未確定
+                    hist[back].setdefault(e.get("regno"), []).append((e.get("place") or 6) - cm[c])
+        for rg in today:
+            vals = []
+            for back in range(1, 11):
+                x = hist[back].get(rg)
+                if not x:
+                    break
+                vals += x
+            if vals:
+                racers.setdefault(rg, {})["setsu"] = round(sum(vals) / len(vals) * len(vals) / (len(vals) + kk), 4)
+                racers[rg]["setsu_n"] = len(vals)
     return {"day": n, "title": v.get("title"), "racers": racers}
 
 
 def main():
     day = dt.datetime.strptime(sys.argv[1], "%Y%m%d").date()
-    for code in sys.argv[2:] or ["07"]:
+    for code in sys.argv[2:] or ["07", "08", "11", "12", "19"]:
         out = build(day, code)
         if not out:
             print(f"節間平均 {code}: なし(1日目か開催なし)")

@@ -76,15 +76,14 @@ for (const code of codes) {
     const no = String(race.no).padStart(2, "0");
     const slot = out.races[race.no] = out.races[race.no] || {};
     const closed = date < today || (date === today && race.deadline && now > race.deadline);
-    if (!slot.pre) {  // 節の2日目以降は 節間平均の展示・オリ展 込み
-      const sm = J("data/model/series.json")?.[code], sr = J(`data/series/${day}/${code}.json`);
-      slot.pre = predict(code, race, sm && sr?.racers ? { series: sr, seriesModel: sm } : null, null);
-      changed = true;
-    }
+    // 節間のまとめ(節間成績・節間平均の展示)。画面の withSeries と同じ
+    const sm = J("data/model/series.json")?.[code], sr = J(`data/series/${day}/${code}.json`);
+    const withS = (b) => (sr?.racers ? { ...(b || {}), series: sr, seriesModel: sm } : b);
+    if (!slot.pre) { slot.pre = predict(code, race, withS(null), null); changed = true; }
     if (!closed || !slot.post) {
       const bi = J(`data/before/${day}/${code}_${no}.json`);
       if (bi?.start?.length === 6 && !closed) {
-        slot.post = predict(code, race, bi, J(`data/live/${day}/${code}_${no}.json`));
+        slot.post = predict(code, race, withS(bi), J(`data/live/${day}/${code}_${no}.json`));
         changed = true;
       }
     }

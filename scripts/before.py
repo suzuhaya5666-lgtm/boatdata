@@ -252,9 +252,12 @@ def fetch_once():
         fetch_live_results(day, now)
     except Exception as e:
         print(f"結果(速報)失敗 {e}")
-    try:  # 節間平均の展示・オリ展(朝の予想用)。1日1回
-        if not os.path.exists(os.path.join(DATA, "series", today.strftime("%Y%m%d"), "07.json")):
-            subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "series.py"), today.strftime("%Y%m%d"), "07"], timeout=120)
+    try:  # 節間平均の展示・オリ展・節間成績(出目確率用)。1日1回
+        sdir = os.path.join(DATA, "series", today.strftime("%Y%m%d"))
+        if not os.path.exists(os.path.join(sdir, ".done")):
+            subprocess.run([sys.executable, os.path.join(os.path.dirname(__file__), "series.py"), today.strftime("%Y%m%d")], timeout=300)
+            os.makedirs(sdir, exist_ok=True)
+            open(os.path.join(sdir, ".done"), "w").close()
     except Exception as e:
         print(f"節間平均の作成失敗 {e}")
     try:  # 振り返り用の予想(蒲郡): 展示前と展示後を data/pred に残す

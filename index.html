@@ -1169,11 +1169,11 @@ async function getBefore(hd, venue, no) {
   return getJSON(path).catch(() => null);
 }
 
-// 節間平均の展示・オリ展(節の2日目以降、展示前の出目確率に使う)。直前情報に series として添える
+// 節間のまとめ(data/series): 節間成績(5場)と、蒲郡の節間平均の展示・オリ展(展示前だけ)。直前情報に series として添える
 async function withSeries(bi, hd, venue) {
   const [sm, sr] = await Promise.all([cached("data/model/series.json"), cached(`data/series/${hd}/${venue}.json`)]);
-  if (!sm?.[venue] || !sr?.racers) return bi;
-  return { ...(bi || {}), series: sr, seriesModel: sm[venue] };
+  if (!sr?.racers) return bi;
+  return { ...(bi || {}), series: sr, seriesModel: sm?.[venue] };
 }
 const cache = {};
 async function cached(path) {
@@ -1481,6 +1481,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
       return x != null && cm ? -(x - cm[k]) : null;
     }
     if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
+    if (f === "setsu") return bi?.series?.racers?.[e.regno]?.setsu ?? null;  // 節間成績(小さいほど好調)
     if (f === "class") return CLS_NUM[e.class] ?? null;
     if (f === "avg_st") return racers[b]?.fst?.st_adj ?? racers[b]?.sheet?.all?.st?.total?.avg ?? null;  // F持ちならF持ち時の平均ST
     if (f === "f_cnt") return racers[b]?.fst?.f ?? 0;
