@@ -257,6 +257,8 @@
   input.amt { width: 56px; font-size: 16px; padding: 6px; border: 1px solid var(--line); border-radius: 6px; text-align: right; }
   #mmode { font-size: 15px; padding: 6px; border-radius: 6px; border: 1px solid var(--line); }
   table.memo td.payc { text-align: right; }
+  table.memo .buy { font-size: 12px; padding: 6px 6px; white-space: nowrap; }
+  table.memo .buy.on { background: #2b8a3e; border-color: #2b8a3e; color: #fff; }
   .pop { display: inline-block; font-size: 12px; font-weight: 800; padding: 2px 8px; border-radius: 999px; }
   .pop.over { background: #ffe3e3; color: #c92a2a; } .pop.fair { background: #f1f3f5; color: #495057; } .pop.under { background: #d3f9d8; color: #2b8a3e; }
   table.memo td.val { background: #d3f9d8; font-weight: 700; color: #2b8a3e; }
@@ -280,6 +282,27 @@
   .own td { font-weight: 700; background: #f7faff; }
   .hi { color: var(--hit); font-weight: 700; }
   #modal { position: fixed; inset: 0; background: rgba(0,0,0,.35); z-index: 20; display: flex; align-items: flex-end; justify-content: center; }
+  /* ---- 収支タブ */
+  .bsrc { margin: 0 0 8px; }
+  .bsum .brow { display: flex; justify-content: space-between; align-items: center; gap: 6px; padding: 8px 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .bsum .brow > span:last-child { text-align: right; }
+  .bsum .blab { font-weight: 700; display: flex; align-items: center; gap: 6px; }
+  .bsum b { font-size: 17px; } .bsum b.bbig { font-size: 22px; } .bsum .bpar { font-size: 14px; } .bsum small.cnt { display: block; }
+  .bsel { font: inherit; font-weight: 700; padding: 4px 6px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--accent); }
+  .bvbtn { width: 100%; margin-top: 10px; }
+  .bmnav { margin: 6px 0; }
+  .bcal { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 2px; }
+  .bwd { text-align: center; font-size: 12px; color: var(--sub); padding: 2px 0; }
+  .sun { color: #e03131 !important; } .sat { color: #1971c2 !important; }
+  .bcell { min-height: 54px; border-radius: 6px; background: var(--bg); padding: 2px; display: flex; flex-direction: column; align-items: center; overflow: hidden; }
+  .bcell.off { background: none; }
+  .bcell.has { background: #fff; border: 1px solid var(--line); cursor: pointer; }
+  .bcell.today { outline: 2px solid var(--accent); }
+  .bcell .bd { font-size: 12px; color: var(--sub); }
+  .bcell .bv { font-size: 10.5px; letter-spacing: -.3px; white-space: nowrap; }
+  .bcell .bv2 { font-size: 9.5px; letter-spacing: -.3px; white-space: nowrap; font-weight: 400; }
+  table.bvt td, table.bdt td { padding: 6px 4px; } table.bvt td.y, table.bdt td.y { text-align: right; font-variant-numeric: tabular-nums; }
+  table.bdt tr.bhit td { background: #fff4e6; }
   #modal[hidden] { display: none; }
   #modal .sheet { background: var(--bg); width: 100%; max-width: 900px; max-height: 88vh; overflow-y: auto;
     border-radius: 16px 16px 0 0; padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); }
@@ -297,9 +320,7 @@
 <main id="view-race"></main>
 <main id="view-venue" hidden></main>
 <main id="view-notes" hidden></main>
-<main id="view-bets" hidden>
-  <div class="card" style="color:var(--sub)">舟券の収支記録は次の段階で作ります。</div>
-</main>
+<main id="view-bets" hidden></main>
 
 <nav>
   <button class="on" data-view="race">レース</button>
@@ -1436,6 +1457,7 @@ function openMemo(v, race, od) {
       <td class="${o && fair && o > fair ? "val" : ""}">${fair ? fair.toFixed(1) : "-"}<br><small class="cnt">${p ? (p * 100).toFixed(1) + "%" : ""}</small></td>
       <td><input class="amt" type="number" min="0" step="1" value="${(m.amt || 0) / 100}" data-t="${m.t}" data-k="${m.k}"><small>00円</small></td>
       <td class="payc">${pay != null ? pay.toLocaleString() + "円" : "-"}<br><small class="${pl >= 0 ? "plus" : "minus"}">${pl != null ? (pl >= 0 ? "+" : "") + pl.toLocaleString() + "円" : ""}</small></td>
+      <td><button class="buy ${m.bought ? "on" : ""}" data-buy="${m.t}|${m.k}">${m.bought ? "購入済" : "購入"}</button></td>
       <td><button class="chk2" data-del="${m.t}|${m.k}">削</button></td></tr>`;
   }).join("");
   $("modal").hidden = false;
@@ -1456,8 +1478,9 @@ function openMemo(v, race, od) {
     ${warnBox}
     <div class="orow"><div class="seg"><button class="pill2 ${state.memoSort === "boat" ? "on" : ""}" data-ms="boat">枠番順</button><button class="pill2 ${state.memoSort === "odds" ? "on" : ""}" data-ms="odds">オッズ順</button></div>
       <span class="cnt">${od?.time ? "オッズ " + esc(od.time) : "締切時オッズ"}</span></div>
-    <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>目安オッズ<br><small>出目確率</small></th><th>購入金額</th><th>想定払戻<br>収支</th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="6" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
-    ${list.length ? '<div style="text-align:center;margin-top:12px"><button class="pill2" id="mclear">すべての買い目を削除</button></div>' : ""}`;
+    <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>目安オッズ<br><small>出目確率</small></th><th>購入金額</th><th>想定払戻<br>収支</th><th>購入<br><small>した印</small></th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
+    ${list.length ? `<div style="text-align:center;margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="pill2" id="mbuyall">${list.every((m) => m.bought) ? "購入の印をすべて外す" : "すべて購入済みにする"}</button><button class="pill2" id="mclear">すべての買い目を削除</button></div>
+    <div class="note">「購入」の印をつけた買い目は、収支タブで（ ）の中に実際に買った分として出ます。</div>` : ""}`;
   const re = () => openMemo(v, race, od);
   $("mclose").onclick = () => { closeModal(); drawOddsTab(v, race, true); };
   document.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => { state.memoSort = b.dataset.ms; re(); });
@@ -1471,6 +1494,12 @@ function openMemo(v, race, od) {
     const [t, k] = b.dataset.del.split("|"); memoToggle(t, k, false); re();
   });
   const cl = $("mclear"); if (cl) cl.onclick = () => { memoSave([]); re(); };
+  document.querySelectorAll("[data-buy]").forEach((b) => b.onclick = () => {
+    const [t, k] = b.dataset.buy.split("|"); const l = memoLoad(); const m = l.find((x) => x.t === t && x.k === k);
+    if (m) m.bought = !m.bought;
+    memoSave(l); re();
+  });
+  const ba = $("mbuyall"); if (ba) ba.onclick = () => { const l = memoLoad(); const on = !l.every((m) => m.bought); l.forEach((m) => { m.bought = on; }); memoSave(l); re(); };
   $("mapply").onclick = () => {
     const units = Math.max(0, Math.round(Number($("mtotal").value) || 0));
     const l = memoLoad();
@@ -2592,7 +2621,217 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   draw();
   if (state.tab === "venue") renderVenue();
   if (state.tab === "notes") renderNotes();
+  if (state.tab === "bets") renderBets();
 }));
+
+// ---------------------------------------------------------------- 収支
+// ユーザー: 買い目メモ(この端末のブラウザに保存)を結果と照らす。( )は「購入」の印をつけた分だけ
+// 集計用予想: data/stats/pnl.json(scripts/pnl.py が保存済みの予想から作る)。1点100円
+const BT = { src: "user", strat: "post_hon", scope: "all", year: null, month: null, vmode: "all" };
+const yenT = (v) => `${v > 0 ? "+" : v < 0 ? "-" : "±"}${Math.abs(v).toLocaleString()}円`;
+const yenN = (v) => `${v > 0 ? "+" : v < 0 ? "-" : "±"}${Math.abs(v).toLocaleString()}`;
+const pmc = (v) => v > 0 ? "plus" : v < 0 ? "minus" : "";
+const vname = (c) => state.index?.venues?.[c] || c;
+
+function memoEntries() {
+  const out = [];
+  try {
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i) || "";
+      const m = /^memo_(\d{4}-\d{2}-\d{2})_(\d{2})_(\d+)$/.exec(key);
+      if (!m) continue;
+      let list = [];
+      try { list = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { continue; }
+      if (Array.isArray(list) && list.length) out.push({ date: m[1], code: m[2], no: Number(m[3]), list });
+    }
+  } catch (e) { /* 保存が使えない環境 */ }
+  return out;
+}
+function memoPay(po, m) {
+  const key = m.k.replace(/=/g, "-");
+  const y = (po?.[DEME_KEY[m.t]] || []).filter((e) => e.combo === key).reduce((a, e) => a + (e.yen || 0), 0);
+  return Math.floor(y * (m.amt || 0) / 100);
+}
+const hasPay = (po) => po && po["3連単"] && po["3連単"].length;
+async function liveRes(date, code, no) {
+  const p = `data/live/${date.replace(/-/g, "")}/${code}_${String(no).padStart(2, "0")}_res.json`;
+  try { const r = await fetch(RAW + p, { cache: "no-store" }); if (r.ok) return await r.json(); } catch (e) { /* なし */ }
+  return null;
+}
+// ユーザーの収支: レースごと {date, code, no, inv, ret, invB, retB, items, done}
+async function userRaces() {
+  const ents = memoEntries();
+  const recent = new Date(Date.now() + 9 * 3600e3 - 2 * 86400e3).toISOString().slice(0, 10);
+  return Promise.all(ents.map(async (e) => {
+    const day = await cached(`data/races/${e.date.slice(0, 4)}/${e.date.replace(/-/g, "")}.json`);
+    const race = day?.venues?.[e.code]?.races?.[e.no];
+    let po = hasPay(race?.payouts) ? race.payouts : null;
+    if (!po && e.date >= recent) { const r = await liveRes(e.date, e.code, e.no); if (hasPay(r?.payouts)) po = r.payouts; }
+    const items = e.list.map((m) => ({ ...m, pay: po ? memoPay(po, m) : null }));
+    const sum = (f) => items.filter(f).reduce((a, m) => [a[0] + (m.amt || 0), a[1] + (m.pay || 0)], [0, 0]);
+    const [inv, ret] = sum(() => true), [invB, retB] = sum((m) => m.bought);
+    return { ...e, items, po, done: !!po, inv, ret, invB, retB, nB: items.filter((m) => m.bought).length };
+  }));
+}
+
+async function renderBets() {
+  const box = $("view-bets");
+  box.innerHTML = '<div class="empty">読み込み中…</div>';
+  let rows = [], pend = 0, races = [];
+  const pnl = await cached("data/stats/pnl.json");
+  if (BT.src === "user") {
+    races = await userRaces();
+    pend = races.filter((r) => !r.done).length;
+    rows = races.filter((r) => r.done).map((r) => ({ date: r.date, code: r.code, inv: r.inv, ret: r.ret, invB: r.invB, retB: r.retB }));
+  } else if (pnl) {
+    if (!pnl.strategies.some((s) => s[0] === BT.strat)) BT.strat = pnl.strategies[0][0];
+    Object.entries(pnl.days).forEach(([date, vs]) => Object.entries(vs).forEach(([code, x]) => {
+      const s = x.sum[BT.strat]; if (s) rows.push({ date, code, inv: s[0], ret: s[1], hit: s[2], n: s[3] });
+    }));
+  }
+  if (state.tab !== "bets") return;
+  const user = BT.src === "user";
+  const venues = [...new Set(rows.map((r) => r.code))].sort();
+  if (BT.scope !== "all" && !venues.includes(BT.scope)) BT.scope = "all";
+  const rs = rows.filter((r) => BT.scope === "all" || r.code === BT.scope);
+  // 年・月: 初回はいちばん新しいデータの月
+  const now = nowJST().date;
+  if (!BT.year) {
+    const last = rs.map((r) => r.date).sort().pop() || now;
+    BT.year = Number(last.slice(0, 4)); BT.month = Number(last.slice(5, 7));
+  }
+  const years = [...new Set([...rows.map((r) => Number(r.date.slice(0, 4))), Number(now.slice(0, 4)), BT.year])].sort();
+  const ym = `${BT.year}-${String(BT.month).padStart(2, "0")}`;
+  const agg = (f) => rs.filter(f).reduce((a, r) => ({ inv: a.inv + r.inv, ret: a.ret + r.ret, invB: a.invB + (r.invB || 0), retB: a.retB + (r.retB || 0), hit: a.hit + (r.hit || 0), n: a.n + (r.n || 0) }),
+    { inv: 0, ret: 0, invB: 0, retB: 0, hit: 0, n: 0 });
+  const tot = agg(() => true), yr = agg((r) => r.date.startsWith(String(BT.year))), mo = agg((r) => r.date.startsWith(ym));
+  const money = (a, big) => {
+    const pl = a.ret - a.inv, plB = a.retB - a.invB;
+    return `<b class="${pmc(pl)} ${big ? "bbig" : ""}">${yenT(pl)}</b>${user ? ` <span class="${pmc(plB)} bpar">(${yenT(plB)})</span>` : ""}
+      <small class="cnt">回収率 ${a.inv ? Math.round(a.ret / a.inv * 100) : "-"}%</small>`;
+  };
+  const sel = (id, opts, v) => `<select id="${id}" class="bsel">${opts.map(([k, t]) => `<option value="${k}" ${String(k) === String(v) ? "selected" : ""}>${t}</option>`).join("")}</select>`;
+
+  const head = `
+    <div class="htabs bsrc">${[["user", "ユーザー"], ["pred", "集計用予想"]].map(([k, t]) => `<button data-bsrc="${k}" class="${BT.src === k ? "on" : ""}">${t}</button>`).join("")}</div>
+    ${!user && pnl ? `<div class="seg">${pnl.strategies.map(([k, t]) => `<button class="pill2 ${BT.strat === k ? "on" : ""}" data-bst="${k}">${esc(t)}</button>`).join("")}</div>
+      <div class="note keep">${esc(pnl.strategies.find((s) => s[0] === BT.strat)?.[2] || "")}。1点100円で、毎レース買った場合。</div>` : ""}`;
+  const summary = `
+    <div class="card bsum">
+      <div class="brow"><span class="blab">総合</span><span>${money(tot, true)}</span></div>
+      <div class="brow"><span class="blab">年間 ${sel("byear", years.map((y) => [y, `${y}年`]), BT.year)}</span><span>${money(yr)}</span></div>
+      <div class="brow"><span class="blab">月間 ${sel("bmonth", Array.from({ length: 12 }, (_, i) => [i + 1, `${i + 1}月`]), BT.month)}</span><span>${money(mo)}</span></div>
+      <button class="pill2 bvbtn" id="bvenue">場ごと収支 ▶</button>
+      ${user ? `<div class="note keep">（ ）の中は「購入」の印をつけた買い目だけの収支。印は買い目メモでつけられます。${pend ? `<br>結果待ちのメモが ${pend} レースあります（集計に入っていません）。` : ""}</div>` : ""}
+    </div>`;
+
+  // カレンダー
+  const byDay = {};
+  rs.filter((r) => r.date.startsWith(ym)).forEach((r) => {
+    const d = byDay[r.date] = byDay[r.date] || { inv: 0, ret: 0, invB: 0, retB: 0 };
+    d.inv += r.inv; d.ret += r.ret; d.invB += r.invB || 0; d.retB += r.retB || 0;
+  });
+  const first = new Date(BT.year, BT.month - 1, 1).getDay(), ndays = new Date(BT.year, BT.month, 0).getDate();
+  let cells = "";
+  for (let i = 0; i < first; i++) cells += '<div class="bcell off"></div>';
+  for (let d = 1; d <= ndays; d++) {
+    const date = `${ym}-${String(d).padStart(2, "0")}`, x = byDay[date], wd = (first + d - 1) % 7;
+    const pl = x ? x.ret - x.inv : 0, plB = x ? x.retB - x.invB : 0;
+    cells += `<div class="bcell ${x ? "has" : ""} ${date === now ? "today" : ""}" ${x ? `data-bday="${date}"` : ""}>
+      <span class="bd ${wd === 0 ? "sun" : wd === 6 ? "sat" : ""}">${d}</span>
+      ${x ? `<span class="bv ${pmc(pl)}">${yenN(pl)}</span>${user && x.invB ? `<span class="bv2 ${pmc(plB)}">(${yenN(plB)})</span>` : ""}` : ""}</div>`;
+  }
+  const cal = `
+    <div class="card">
+      <div class="seg">${[["all", "総合"], ...venues.map((c) => [c, vname(c)])].map(([k, t]) => `<button class="pill2 ${BT.scope === k ? "on" : ""}" data-bsc="${k}">${esc(t)}</button>`).join("")}</div>
+      <div class="datenav bmnav"><button class="pill" id="bprev">◀</button><div class="label">${BT.year}年${BT.month}月</div><button class="pill" id="bnext">▶</button></div>
+      <div class="bcal">${WD.map((w, i) => `<div class="bwd ${i === 0 ? "sun" : i === 6 ? "sat" : ""}">${w}</div>`).join("")}${cells}</div>
+      <div class="note keep">日付を押すと、その日のレースごとの収支が出ます。</div>
+    </div>`;
+  const empty = !rows.length ? `<div class="card cnt">${user ? "まだ結果の出た買い目メモがありません。オッズタブでオッズを押すと、買い目メモに入ります。" : "まだ集計できる予想がありません。"}</div>` : "";
+  box.innerHTML = head + empty + summary + cal;
+
+  box.querySelectorAll("[data-bsrc]").forEach((b) => b.onclick = () => { BT.src = b.dataset.bsrc; renderBets(); });
+  box.querySelectorAll("[data-bst]").forEach((b) => b.onclick = () => { BT.strat = b.dataset.bst; renderBets(); });
+  box.querySelectorAll("[data-bsc]").forEach((b) => b.onclick = () => { BT.scope = b.dataset.bsc; renderBets(); });
+  $("byear").onchange = (e) => { BT.year = Number(e.target.value); renderBets(); };
+  $("bmonth").onchange = (e) => { BT.month = Number(e.target.value); renderBets(); };
+  const shift = (k) => { let y = BT.year, m = BT.month + k; if (m < 1) { m = 12; y--; } if (m > 12) { m = 1; y++; } BT.year = y; BT.month = m; renderBets(); };
+  $("bprev").onclick = () => shift(-1);
+  $("bnext").onclick = () => shift(1);
+  $("bvenue").onclick = () => openVenuePnl(rows, user);
+  box.querySelectorAll("[data-bday]").forEach((c) => c.onclick = () => openDayPnl(c.dataset.bday, user, races, pnl));
+}
+
+function openVenuePnl(rows, user) {
+  const ym = `${BT.year}-${String(BT.month).padStart(2, "0")}`;
+  const f = { all: () => true, year: (r) => r.date.startsWith(String(BT.year)), month: (r) => r.date.startsWith(ym) }[BT.vmode];
+  const by = {};
+  rows.filter(f).forEach((r) => {
+    const a = by[r.code] = by[r.code] || { inv: 0, ret: 0, invB: 0, retB: 0, days: new Set() };
+    a.inv += r.inv; a.ret += r.ret; a.invB += r.invB || 0; a.retB += r.retB || 0; a.days.add(r.date);
+  });
+  const list = Object.entries(by).sort((a, b) => (b[1].ret - b[1].inv) - (a[1].ret - a[1].inv));
+  const body = list.map(([c, a]) => {
+    const pl = a.ret - a.inv, plB = a.retB - a.invB;
+    return `<tr><td class="name">${esc(vname(c))}<br><small class="cnt">${a.days.size}日</small></td>
+      <td class="y">${a.inv.toLocaleString()}<br><small class="cnt">${a.ret.toLocaleString()}</small></td>
+      <td class="y">${a.inv ? Math.round(a.ret / a.inv * 100) : "-"}%</td>
+      <td class="y"><b class="${pmc(pl)}">${yenT(pl)}</b>${user ? `<br><small class="${pmc(plB)}">(${yenT(plB)})</small>` : ""}</td></tr>`;
+  }).join("");
+  $("modal").hidden = false;
+  $("sheet").innerHTML = `<button class="close" id="mclose">閉じる</button>
+    <h2>場ごと収支 <small style="color:var(--sub)">${BT.src === "user" ? "ユーザー" : "集計用予想"}</small></h2>
+    <div class="seg">${[["all", "総合"], ["year", `年間（${BT.year}年）`], ["month", `月間（${BT.year}年${BT.month}月）`]].map(([k, t]) =>
+      `<button class="pill2 ${BT.vmode === k ? "on" : ""}" data-vm="${k}">${t}</button>`).join("")}</div>
+    <div class="tbl"><table class="cmp bvt"><thead><tr><th>場</th><th>投資<br><small>払戻</small></th><th>回収率</th><th>収支</th></tr></thead>
+      <tbody>${body || '<tr><td colspan="4" class="cnt">この期間の収支はありません</td></tr>'}</tbody></table></div>
+    <div class="note">年間・月間は、収支タブで選んでいる年と月です。</div>`;
+  $("mclose").onclick = closeModal;
+  document.querySelectorAll("[data-vm]").forEach((b) => b.onclick = () => { BT.vmode = b.dataset.vm; openVenuePnl(rows, user); });
+}
+
+function openDayPnl(date, user, races, pnl) {
+  const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+  const combo = (k, t = "3t") => k.split(/[-=]/).map(Number).map(bb).join(ORDERED[t] ? "-" : "=");
+  const inScope = (c) => BT.scope === "all" || c === BT.scope;
+  let html = "";
+  if (user) {
+    const rs = races.filter((r) => r.date === date && r.done && inScope(r.code)).sort((a, b) => a.code.localeCompare(b.code) || a.no - b.no);
+    html = rs.map((r) => {
+      const pl = r.ret - r.inv, plB = r.retB - r.invB, t3 = r.po["3連単"][0];
+      const items = r.items.map((m) => `<tr class="${m.pay > 0 ? "bhit" : ""}"><td>${combo(m.k, m.t)}<br><small class="cnt">${ONAME[m.t]}</small></td>
+        <td class="y">${(m.amt || 0).toLocaleString()}円</td><td class="y">${m.pay ? m.pay.toLocaleString() + "円" : "-"}</td>
+        <td>${m.bought ? '<span class="pop under">購入</span>' : ""}</td></tr>`).join("");
+      return `<div class="card"><div class="orow"><b>${esc(vname(r.code))} ${r.no}R</b><span class="cnt">結果 ${esc(t3.combo)}（${(t3.yen || 0).toLocaleString()}円）</span></div>
+        <div class="orow"><span>収支</span><span><b class="${pmc(pl)}">${yenT(pl)}</b> <span class="${pmc(plB)}">(${yenT(plB)})</span></span></div>
+        <div class="tbl"><table class="cmp bdt"><thead><tr><th>買い目</th><th>金額</th><th>払戻</th><th></th></tr></thead><tbody>${items}</tbody></table></div></div>`;
+    }).join("");
+  } else {
+    const day = pnl?.days?.[date] || {};
+    const name = Object.fromEntries(pnl.strategies.map((s) => [s[0], s[1]]));
+    html = Object.entries(day).filter(([c]) => inScope(c)).sort().map(([c, x]) => {
+      const rr = Object.entries(x.races).sort((a, b) => a[0] - b[0]).map(([no, r]) => {
+        const b = r.b[BT.strat];
+        return `<tr class="${b && b[1] > 0 ? "bhit" : ""}"><td>${no}R</td><td>${esc(r.res)}<br><small class="cnt">${(r.yen || 0).toLocaleString()}円</small></td>
+          <td class="y">${b ? b[0].toLocaleString() : "-"}</td><td class="y">${b ? b[1].toLocaleString() : "-"}</td>
+          <td class="y">${b ? `<span class="${pmc(b[1] - b[0])}">${yenN(b[1] - b[0])}</span>` : "買わず"}</td></tr>`;
+      }).join("");
+      const all = pnl.strategies.filter(([k]) => x.sum[k]).map(([k]) => {
+        const [inv, ret, hit, n] = x.sum[k];
+        return `<tr class="${k === BT.strat ? "own" : ""}"><td class="name">${esc(name[k])}</td><td class="y">${hit}/${n}</td><td class="y">${Math.round(ret / inv * 100)}%</td><td class="y"><span class="${pmc(ret - inv)}">${yenT(ret - inv)}</span></td></tr>`;
+      }).join("");
+      return `<div class="card"><h2>${esc(vname(c))} <small class="cnt">${esc(name[BT.strat])}</small></h2>
+        <div class="tbl"><table class="cmp bdt"><thead><tr><th>R</th><th>結果</th><th>投資</th><th>払戻</th><th>収支</th></tr></thead><tbody>${rr}</tbody></table></div>
+        <h2 style="margin-top:12px;font-size:15px">この日の買い方ごと</h2>
+        <div class="tbl"><table class="cmp bdt"><thead><tr><th>買い方</th><th>的中</th><th>回収率</th><th>収支</th></tr></thead><tbody>${all}</tbody></table></div></div>`;
+    }).join("");
+  }
+  $("modal").hidden = false;
+  $("sheet").innerHTML = `<button class="close" id="mclose">閉じる</button>
+    <h2>${dateLabel(date)}の収支</h2>${html || '<div class="card cnt">この日の収支はありません</div>'}`;
+  $("mclose").onclick = closeModal;
+}
 
 // ---------------------------------------------------------------- 解析ノート
 async function renderNotes() {

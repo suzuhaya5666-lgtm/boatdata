@@ -35,6 +35,7 @@ jobs:
         run: |
           pip install --quiet numpy
           python scripts/stats.py
+          python scripts/pnl.py
 
       - name: 公開するファイルをまとめる
         run: |
