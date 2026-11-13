@@ -4,7 +4,7 @@
   data/stats/pnl.json
     strategies: [[キー, 名前, 説明], ...]
     days: {"YYYY-MM-DD": {場コード: {"sum": {キー: [投資, 払戻, 的中レース数, 買ったレース数]},
-                                     "races": {R: {"res": 3連単, "yen": 配当, "b": {キー: [投資, 払戻, [[買い目, 金額, 払戻], ...]]}}}}}}
+                                     "races": {R: {"res": 3連単, "yen": 配当, "y2": 2連単の配当, "b": {キー: [投資, 払戻, [[買い目, 金額, 払戻], ...]]}}}}}}
   買い目は 1-2-3 なら3連単、1-2 なら2連単。
 1点100円。結果は data/races の払戻、まだなければ data/live の速報(_res)を使う。
 """
@@ -126,7 +126,8 @@ def main():
                 if not b:
                     continue
                 t3 = po["3連単"][0]
-                rs[r] = {"res": t3.get("combo"), "yen": t3.get("yen"), "b": b}
+                t2 = (po.get("2連単") or [{}])[0]
+                rs[r] = {"res": t3.get("combo"), "yen": t3.get("yen"), "y2": t2.get("yen"), "b": b}
                 for k, (inv, ret, _) in b.items():
                     s = summ.setdefault(k, [0, 0, 0, 0])
                     s[0] += inv

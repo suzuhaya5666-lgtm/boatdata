@@ -2821,6 +2821,7 @@ function openDayPnl(date, user, races, pnl) {
   } else {
     const day = pnl?.days?.[date] || {};
     const name = Object.fromEntries(pnl.strategies.map((s) => [s[0], s[1]]));
+    const is2 = /2連単/.test(name[BT.strat] || "");  // 2連単の買い方は、2連単の配当も添える
     html = Object.entries(day).filter(([c]) => inScope(c)).sort().map(([c, x]) => {
       const rr = Object.entries(x.races).sort((a, b) => a[0] - b[0]).map(([no, r]) => {
         const b = r.b[BT.strat];
@@ -2828,7 +2829,7 @@ function openDayPnl(date, user, races, pnl) {
         const its = b?.[2] || [];
         const det = its.length ? `<tr class="rbd" data-rbd="${c}_${no}" hidden><td colspan="5"><table class="rbi"><tbody>${its.map(([k, amt, py]) =>
           `<tr class="${py > 0 ? "hit" : ""}"><td>${combo(k, k.split("-").length === 3 ? "3t" : "2t")} <small class="cnt">${k.split("-").length === 3 ? "3連単" : "2連単"}</small></td><td class="y">${amt.toLocaleString()}円</td><td class="y">${py > 0 ? `的中 ${py.toLocaleString()}円` : "-"}</td></tr>`).join("")}</tbody></table></td></tr>` : "";
-        return `<tr class="${b && b[1] > 0 ? "bhit" : ""}"><td>${its.length ? `<button class="rbtn" data-rb="${c}_${no}">${no}R</button>` : `${no}R`}</td><td>${esc(r.res)}<br><small class="cnt">${(r.yen || 0).toLocaleString()}円</small></td>
+        return `<tr class="${b && b[1] > 0 ? "bhit" : ""}"><td>${its.length ? `<button class="rbtn" data-rb="${c}_${no}">${no}R</button>` : `${no}R`}</td><td>${esc(r.res)}<br><small class="cnt">${(r.yen || 0).toLocaleString()}円</small>${is2 && r.y2 ? `<br><small class="cnt">（2連単 ${r.y2.toLocaleString()}円）</small>` : ""}</td>
           <td class="y">${b ? b[0].toLocaleString() : "-"}</td><td class="y">${b ? b[1].toLocaleString() : "-"}</td>
           <td class="y">${b ? `<span class="${pmc(b[1] - b[0])}">${yenN(b[1] - b[0])}</span>` : "買わず"}</td></tr>${det}`;
       }).join("");
