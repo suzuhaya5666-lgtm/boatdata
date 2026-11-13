@@ -29,6 +29,8 @@ const day = process.argv[2];
 const codes = process.argv.slice(3).length ? process.argv.slice(3) : ["07"];
 const date = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
 const dayData = J(`data/races/${day.slice(0, 4)}/${day}.json`);
+state.date = date;
+state.day = dayData;
 if (!dayData) process.exit(0);
 const model = J("data/model/weights.json"), vs = J("data/stats/venues.json");
 const nowD = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
@@ -116,7 +118,12 @@ function predict(code, race, bi, od) {
     split: fav != null && fav >= SPLIT, combo: fav != null && fav >= SPLIT && ["07", "19"].includes(code) && a && a.lvl >= 2,
     hon: tri.slice(0, 3).map(one),
     top10list: tri.slice(0, 10).map(one),
-    ex1: exs.slice(0, 3).map(([k, p]) => ({ k, p: r4(p), o: o2[k] || null })),
+    // 2連単の確率上位3つ: オッズ・期待値と、同じ1着・2着の3連単4点流しの合成オッズ(高ければ3連単に切り替える)
+    ex1: exs.slice(0, 3).map(([k, p]) => {
+      const t3 = Object.entries(o3).filter(([kk, v]) => kk.startsWith(k + "-") && v > 0).map(([, v]) => v);
+      const syn = t3.length === 4 ? Math.round(100 / t3.reduce((a, v) => a + 1 / v, 0)) / 100 : null;
+      return { k, p: r4(p), o: o2[k] || null, ev: o2[k] ? Math.round(p * o2[k] * 100) / 100 : null, syn };
+    }),
     // オッズがあるときだけ(最終オッズでの検証と同じ選び方)
     bal: hasOdds ? tri.slice(0, 10).filter((t) => o3[t.k] && t.p * o3[t.k] >= 1).sort((x, y) => y.p * o3[y.k] - x.p * o3[x.k]).slice(0, 5).map(one) : null,
     ex: hasOdds ? exs.slice(0, 3).filter(([k, p]) => o2[k] && p * o2[k] >= 1.2).sort((x, y) => y[1] * o2[y[0]] - x[1] * o2[x[0]]).slice(0, 1).map(([k, p]) => ({ k, p: r4(p), o: o2[k] })) : null,

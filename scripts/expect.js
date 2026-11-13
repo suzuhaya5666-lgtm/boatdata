@@ -26,6 +26,7 @@ const dayData = J(`data/races/${day.slice(0, 4)}/${day}.json`);
 const model = J("data/model/weights.json"), vs = J("data/stats/venues.json");
 if (!dayData || !model || !vs) process.exit(0);
 state.day = dayData;
+state.date = `${day.slice(0, 4)}-${day.slice(4, 6)}-${day.slice(6, 8)}`;
 state.featMask = model.setsu_base_mask ?? null;
 // 過去の直前情報(before_past、gzip)
 const zlib = require("zlib");

@@ -260,8 +260,8 @@ def fetch_once():
             open(os.path.join(sdir, ".done"), "w").close()
     except Exception as e:
         print(f"節間平均の作成失敗 {e}")
-    try:  # 振り返り用の予想(蒲郡): 展示前と展示後を data/pred に残す
-        r = subprocess.run(["node", os.path.join(os.path.dirname(__file__), "pred.js"), today.strftime("%Y%m%d"), "07"],
+    try:  # 振り返り用の予想(5場): 展示前と展示後を data/pred に残す
+        r = subprocess.run(["node", os.path.join(os.path.dirname(__file__), "pred.js"), today.strftime("%Y%m%d"), "07", "08", "11", "12", "19"],
                            capture_output=True, text=True, timeout=120)
         print((r.stdout or "").strip() or (r.stderr or "").strip()[-300:])
     except Exception as e:
