@@ -1,0 +1,58 @@
+name: probe4
+# 調査用: サイト内をたどって(同じホストだけ・上限つき)、キーワードを含むページを探す(保存しない)
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "出発点のURL(空白区切り)"
+        required: true
+      find:
+        description: "ページ本文で探す語(正規表現)"
+        default: "一周|周回タイム|まわり足|回り足"
+      follow:
+        description: "たどるリンクの条件(正規表現、空なら全部)"
+        default: ""
+      maxpages:
+        description: "最大ページ数"
+        default: "250"
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - env:
+          START: ${{ inputs.start }}
+          FIND: ${{ inputs.find }}
+          FOLLOW: ${{ inputs.follow }}
+          MAXP: ${{ inputs.maxpages }}
+        run: |
+          cat > c.py <<'PY'
+          import os, re, subprocess, html, collections
+          from urllib.parse import urljoin, urlparse, urldefrag
+          find = re.compile(os.environ["FIND"]); follow = re.compile(os.environ["FOLLOW"]) if os.environ["FOLLOW"] else None
+          maxp = int(os.environ["MAXP"])
+          def get(u):
+              r = subprocess.run(["curl", "-sSL", "-4", "--max-time", "20", "-A", "Mozilla/5.0", u], capture_output=True)
+              return r.stdout.decode("utf-8", errors="replace") if r.returncode == 0 else "", r.stdout
+          starts = os.environ["START"].split()
+          hosts = {urlparse(u).netloc for u in starts}
+          q = collections.deque(starts); seen = set(starts); n = 0
+          skip = re.compile(r"\.(png|jpe?g|gif|svg|ico|css|js|pdf|mp4|zip|woff2?|ttf)(\?|$)", re.I)
+          while q and n < maxp:
+              u = q.popleft(); n += 1
+              h, raw = get(u)
+              if not h: continue
+              if "charset=shift_jis" in h.lower() or "charset=sjis" in h.lower():
+                  h = raw.decode("cp932", errors="replace")
+              t = html.unescape(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", re.sub(r"<script.*?</script>|<style.*?</style>", "", h, flags=re.S))))
+              m = find.search(t)
+              if m:
+                  print(f"HIT {u}\n   {t[max(0, m.start()-200): m.end()+400]}")
+              for l in re.findall(r'(?:href|src)\s*=\s*["\']([^"\'#]+)', h, re.I):
+                  v = urldefrag(urljoin(u, l))[0]
+                  if urlparse(v).netloc not in hosts or skip.search(v) or v in seen: continue
+                  if follow and not follow.search(v): continue
+                  seen.add(v); q.append(v)
+          print(f"pages {n}, queued {len(q)}")
+          PY
+          python3 c.py
