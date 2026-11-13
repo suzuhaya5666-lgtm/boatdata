@@ -4,7 +4,8 @@
   data/stats/pnl.json
     strategies: [[キー, 名前, 説明], ...]
     days: {"YYYY-MM-DD": {場コード: {"sum": {キー: [投資, 払戻, 的中レース数, 買ったレース数]},
-                                     "races": {R: {"res": 3連単, "yen": 配当, "b": {キー: [投資, 払戻]}}}}}}
+                                     "races": {R: {"res": 3連単, "yen": 配当, "b": {キー: [投資, 払戻, [[買い目, 金額, 払戻], ...]]}}}}}}
+  買い目は 1-2-3 なら3連単、1-2 なら2連単。
 1点100円。結果は data/races の払戻、まだなければ data/live の速報(_res)を使う。
 """
 import glob
@@ -60,31 +61,37 @@ def bets(pre, post, po):
     """買い方ごとの [投資, 払戻]。買わなかった買い方は入れない"""
     out = {}
 
+    def put(name, items):
+        """items: [(買い目, 金額)]。券種は買い目の長さで決まる"""
+        rows = []
+        for k, amt in items:
+            typ = "3連単" if len(k.split("-")) == 3 else "2連単"
+            rows.append([k, amt, pay(po, typ, k) * amt // 100])
+        out[name] = [sum(r[1] for r in rows), sum(r[2] for r in rows), rows]
+
     def tri(name, ks):
         if ks:
-            out[name] = [100 * len(ks), sum(pay(po, "3連単", k) for k in ks)]
+            put(name, [(k, 100) for k in ks])
 
     if pre:
         tri("pre_hon", keys(pre.get("hon")))
         ex1 = keys(pre.get("ex1"))
         if ex1:
-            out["pre_ex1"] = [100, pay(po, "2連単", ex1[0])]
+            put("pre_ex1", [(ex1[0], 100)])
     if post:
         tri("post_hon", keys(post.get("hon")))
         ex1 = keys(post.get("ex1"))
         if ex1:
-            out["post_ex1"] = [100, pay(po, "2連単", ex1[0])]
+            put("post_ex1", [(ex1[0], 100)])
         tri("bal", keys(post.get("bal")))
         ex = keys(post.get("ex"))
         if ex:
-            typ = "3連単" if len(ex[0].split("-")) == 3 else "2連単"
-            out["ex"] = [100 * len(ex), sum(pay(po, typ, k) for k in ex)]
+            put("ex", [(k, 100) for k in ex])
         tri("ana", keys(post.get("ana")))
         a = post.get("ana12")
         if a and a.get("best") in a:
-            b = a[a["best"]]["k"]
-            out["ana12"] = [100 * len(b), sum(pay(po, "3連単", k) for k in b)]
-            if (post.get("fav") or 0) >= 5:
+            tri("ana12", a[a["best"]]["k"])
+            if (post.get("fav") or 0) >= 5 and "ana12" in out:
                 out["ana12_f5"] = list(out["ana12"])
         e = post.get("ex3")
         if e:
@@ -92,9 +99,9 @@ def bets(pre, post, po):
             if c10 and e.get("o2") and e.get("cut10_syn"):
                 n = len(c10)
                 if e["o2"] > e["cut10_syn"]:
-                    out["ex3_10sw"] = [100 * n, pay(po, "2連単", e["k"]) * n]
+                    put("ex3_10sw", [(e["k"], 100 * n)])
                 else:
-                    out["ex3_10sw"] = [100 * n, sum(pay(po, "3連単", k) for k in c10)]
+                    tri("ex3_10sw", c10)
             tri("ex3_20", keys(e.get("cut20")))
     return out
 
@@ -120,7 +127,7 @@ def main():
                     continue
                 t3 = po["3連単"][0]
                 rs[r] = {"res": t3.get("combo"), "yen": t3.get("yen"), "b": b}
-                for k, (inv, ret) in b.items():
+                for k, (inv, ret, _) in b.items():
                     s = summ.setdefault(k, [0, 0, 0, 0])
                     s[0] += inv
                     s[1] += ret

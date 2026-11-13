@@ -308,6 +308,12 @@
   .bcell .bv2 { font-size: 9.5px; letter-spacing: -.3px; white-space: nowrap; font-weight: 400; }
   table.bvt td, table.bdt td { padding: 6px 4px; } table.bvt td.y, table.bdt td.y { text-align: right; font-variant-numeric: tabular-nums; }
   table.bdt tr.bhit td { background: #fff4e6; }
+  .rbtn { border: 1px solid var(--line, #d0d5dd); background: #fff; border-radius: 8px; padding: 5px 9px; font-weight: 700; font-size: 14px; color: inherit; }
+  .rbtn.on { background: #1f6feb; border-color: #1f6feb; color: #fff; }
+  table.bdt tr.rbd td { background: #f6f8fa; padding: 6px 8px; }
+  table.rbi { width: 100%; font-size: 13px; }
+  table.rbi td { padding: 3px 4px; border: 0 !important; background: transparent !important; }
+  table.rbi tr.hit td { color: #1a7f37; font-weight: 700; }
   #modal[hidden] { display: none; }
   #modal .sheet { background: var(--bg); width: 100%; max-width: 900px; max-height: 88vh; overflow-y: auto;
     border-radius: 16px 16px 0 0; padding: 12px 12px calc(16px + env(safe-area-inset-bottom)); }
@@ -2818,9 +2824,13 @@ function openDayPnl(date, user, races, pnl) {
     html = Object.entries(day).filter(([c]) => inScope(c)).sort().map(([c, x]) => {
       const rr = Object.entries(x.races).sort((a, b) => a[0] - b[0]).map(([no, r]) => {
         const b = r.b[BT.strat];
-        return `<tr class="${b && b[1] > 0 ? "bhit" : ""}"><td>${no}R</td><td>${esc(r.res)}<br><small class="cnt">${(r.yen || 0).toLocaleString()}円</small></td>
+        // レース番号を押すと、買い目と金額が開く
+        const its = b?.[2] || [];
+        const det = its.length ? `<tr class="rbd" data-rbd="${c}_${no}" hidden><td colspan="5"><table class="rbi"><tbody>${its.map(([k, amt, py]) =>
+          `<tr class="${py > 0 ? "hit" : ""}"><td>${combo(k, k.split("-").length === 3 ? "3t" : "2t")} <small class="cnt">${k.split("-").length === 3 ? "3連単" : "2連単"}</small></td><td class="y">${amt.toLocaleString()}円</td><td class="y">${py > 0 ? `的中 ${py.toLocaleString()}円` : "-"}</td></tr>`).join("")}</tbody></table></td></tr>` : "";
+        return `<tr class="${b && b[1] > 0 ? "bhit" : ""}"><td>${its.length ? `<button class="rbtn" data-rb="${c}_${no}">${no}R</button>` : `${no}R`}</td><td>${esc(r.res)}<br><small class="cnt">${(r.yen || 0).toLocaleString()}円</small></td>
           <td class="y">${b ? b[0].toLocaleString() : "-"}</td><td class="y">${b ? b[1].toLocaleString() : "-"}</td>
-          <td class="y">${b ? `<span class="${pmc(b[1] - b[0])}">${yenN(b[1] - b[0])}</span>` : "買わず"}</td></tr>`;
+          <td class="y">${b ? `<span class="${pmc(b[1] - b[0])}">${yenN(b[1] - b[0])}</span>` : "買わず"}</td></tr>${det}`;
       }).join("");
       const all = pnl.strategies.filter(([k]) => x.sum[k]).map(([k]) => {
         const [inv, ret, hit, n] = x.sum[k];
@@ -2828,6 +2838,7 @@ function openDayPnl(date, user, races, pnl) {
       }).join("");
       return `<div class="card"><h2>${esc(vname(c))} <small class="cnt">${esc(name[BT.strat])}</small></h2>
         <div class="tbl"><table class="cmp bdt"><thead><tr><th>R</th><th>結果</th><th>投資</th><th>払戻</th><th>収支</th></tr></thead><tbody>${rr}</tbody></table></div>
+        <div class="note keep">レース番号を押すと、買い目と金額が出ます。</div>
         <h2 style="margin-top:12px;font-size:15px">この日の買い方ごと</h2>
         <div class="tbl"><table class="cmp bdt"><thead><tr><th>買い方</th><th>的中</th><th>回収率</th><th>収支</th></tr></thead><tbody>${all}</tbody></table></div></div>`;
     }).join("");
@@ -2836,6 +2847,11 @@ function openDayPnl(date, user, races, pnl) {
   $("sheet").innerHTML = `<button class="close" id="mclose">閉じる</button>
     <h2>${dateLabel(date)}の収支</h2>${html || '<div class="card cnt">この日の収支はありません</div>'}`;
   $("mclose").onclick = closeModal;
+  $("sheet").querySelectorAll("[data-rb]").forEach((bt) => bt.onclick = () => {
+    const row = $("sheet").querySelector(`[data-rbd="${bt.dataset.rb}"]`);
+    if (!row) return;
+    row.hidden = !row.hidden; bt.classList.toggle("on", !row.hidden);
+  });
 }
 
 // ---------------------------------------------------------------- 解析ノート
