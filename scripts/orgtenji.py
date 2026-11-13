@@ -1,6 +1,8 @@
 """各場のオリジナル展示(一周・まわり足・直線など)を取る。
 
-今のところ蒲郡のみ(公式サイトの「オリジナル展示」ページ。過去の日付も取れる)。
+蒲郡: 公式サイトの「オリジナル展示」ページ。
+常滑・下関: 公式サイトの直前情報「オリジナル展示データ」タブ(modules/yosou、過去の日付も取れる。
+  常滑は2026年春ごろから、下関は2024年以前から残っている)。
   直前情報と一緒に取る:  before.py から fetch(code, day, rno) を呼ぶ
   過去分のまとめ取り:    python scripts/orgtenji.py --start 20231110 --end 20261109 --workers 3
     保存先: data/org_past/YYYY/YYYYMMDD.json.gz  ({"07_01": {"1": {"lap":.., "turn":.., "straight":..}, ...}})
@@ -21,7 +23,9 @@ sys.path.insert(0, os.path.dirname(__file__))
 from collect import DATA  # noqa: E402
 
 GAMAGORI = "https://www.gamagori-kyotei.com/asp/gamagori/kyogi/kyogihtml/time/time{hd}07{rno:02d}.htm"
-VENUES = {"07": "蒲郡"}   # オリジナル展示が取れる場
+CMS = {"08": "https://www.boatrace-tokoname.jp", "19": "https://www.boatrace-shimonoseki.jp"}
+CMS_URL = "{base}/modules/yosou/group-cyokuzen.php?day={hd}&race={rno}&kind=2&if=1"
+VENUES = {"07": "蒲郡", "08": "常滑", "19": "下関"}   # オリジナル展示が取れる場
 LABELS = {"lap": "一周", "turn": "まわり足", "straight": "直線"}
 OUT = os.path.join(DATA, "org_past")
 
@@ -58,8 +62,33 @@ def parse_gamagori(html):
     return out
 
 
+def parse_cms(html):
+    """常滑・下関(同じ作りのサイト)の「オリジナル展示データ」表。"""
+    out = {}
+    if "category-oriten" not in html:
+        return out
+    body = html.split("category-oriten", 1)[1]
+    for tr in re.split(r"<tr[ >]", body):
+        m = re.search(r"class=[\'\"]col1 waku tei_color(\d)", tr)
+        if not m:
+            continue
+        def col(n):
+            c = re.search(r"class=[\'\"]col%d[^>]*>(.*?)</td>" % n, tr, re.S)
+            return num(c.group(1)) if c else None
+        reg = re.search(r"/(\d{4})</li>|/(\d{4})<img", tr)
+        lap, turn, straight = col(6), col(7), col(8)
+        if lap is None and turn is None and straight is None:
+            continue
+        out[m.group(1)] = {"regno": (reg.group(1) or reg.group(2)) if reg else None, "exh": col(5),
+                           "lap": lap, "turn": turn, "straight": straight}
+    return out
+
+
 def fetch(code, day, rno):
     """オリジナル展示を返す。取れない場・まだ出ていないときは None。"""
+    if code in CMS:
+        html = get(CMS_URL.format(base=CMS[code], hd=f"{day:%Y%m%d}", rno=rno))
+        return (parse_cms(html) or None) if html else None
     if code != "07":
         return None
     html = get(GAMAGORI.format(hd=f"{day:%Y%m%d}", rno=rno))
@@ -108,6 +137,7 @@ def main():
     ap.add_argument("--end", required=True)
     ap.add_argument("--max-minutes", type=float, default=320)
     ap.add_argument("--workers", type=int, default=3)
+    ap.add_argument("--codes", default=",".join(VENUES), help="場コード(カンマ区切り)")
     a = ap.parse_args()
     t0 = time.time()
     start = dt.datetime.strptime(a.start, "%Y%m%d").date()
@@ -120,7 +150,7 @@ def main():
         with open(p, encoding="utf-8") as f:
             day = json.load(f)
         have = load_day(d)
-        for code in VENUES:
+        for code in a.codes.split(","):
             for no in day["venues"].get(code, {}).get("races", {}):
                 key = f"{code}_{int(no):02d}"
                 if key not in have:
