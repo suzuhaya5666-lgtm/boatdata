@@ -29,6 +29,11 @@
   .bar { position: sticky; top: 0; z-index: 5; background: var(--card); border-bottom: 1px solid var(--line);
     padding: calc(22px + env(safe-area-inset-top)) 12px 8px; }
   .bar .in { max-width: 900px; margin: 0 auto; }
+  /* 画面上部(時計・電池の所)に文字が潜り込んでぼやけないよう、無地で隠す。上部バーがない画面は中身をその下から始める */
+  body::before { content: ""; position: fixed; left: 0; right: 0; top: 0; height: calc(env(safe-area-inset-top) + 6px);
+    background: var(--bg); z-index: 4; pointer-events: none; }
+  body.withbar::before { background: var(--card); }
+  #bar[hidden] ~ main { padding-top: calc(18px + env(safe-area-inset-top)); }
   .datenav { display: flex; align-items: center; gap: 10px; }
   .datenav .pill { border-radius: 999px; padding: 8px 16px; color: var(--sub); white-space: nowrap; }
   .datenav .label { flex: 1; text-align: center; font-weight: 800; font-size: 18px; position: relative; white-space: nowrap; }
@@ -412,8 +417,8 @@ function scrollToNext() {
 }
 
 function draw() {
-  if (state.tab !== "race") { $("bar").hidden = true; return; }
-  $("bar").hidden = false;
+  if (state.tab !== "race") { $("bar").hidden = true; document.body.classList.remove("withbar"); return; }
+  $("bar").hidden = false; document.body.classList.add("withbar");
   if (state.screen === "home") drawHome();
   else if (state.screen === "list") drawList();
   else drawDetail();
