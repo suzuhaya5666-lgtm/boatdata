@@ -655,6 +655,47 @@ def evaluate(LQ, Z, Y, V, S, KD, coefs, cbias, rows):
     return {"tri10": round(tri10 * 100, 1), "ex3": round(ex3 * 100, 1), "tan": round(tan * 100, 1)}
 
 
+def predict_perm(LQ, Z, V, S, KD, coefs, cbias, rows):
+    """3連単120通り(コース順、PERMS の並び)の確率。"""
+    LQ, Z, V, S, KD = LQ[rows], Z[rows], V[rows], S[rows], KD[rows]
+    ex = []
+    for j in range(3):
+        c = np.array(coefs[j])
+        vb = np.array([cbias[j]["venues"][cc] for cc in VCODES])
+        kb = np.array([[0] * 7] + [cbias[j]["kinds"][k] for k in KINDS])
+        s = c[0] * LQ[:, :, j] + Z @ c[1:] + vb[V] + S.astype(float)[:, None] * np.array(cbias[j]["sgg1"])[None, :] + kb[KD]
+        s[:, 0] = -1e9
+        ex.append(np.exp(s - s.max(1, keepdims=True)))
+    s1, s2, s3 = ex
+    a, b, cc = PERMS[:, 0], PERMS[:, 1], PERMS[:, 2]
+    p = (s1[:, a] / s1.sum(1, keepdims=True)) * (s2[:, b] / (s2.sum(1, keepdims=True) - s2[:, a])) * \
+        (s3[:, cc] / (s3.sum(1, keepdims=True) - s3[:, a] - s3[:, b]))
+    return p / p.sum(1, keepdims=True)
+
+
+PAIR_K = 50   # 1着×2着などの補正表: 予想の数がこれより少ないマスは1倍に寄せる
+PAIRS = [(0, 1), (0, 2), (1, 2)]   # (1着,2着) → (1着,3着) → (2着,3着) の順にかける
+
+
+def pair_tables(p, Y, k=PAIR_K):
+    """出目確率は1着・2着・3着をほぼ別々に決めるので、「1号艇が逃げたら2着は2・3号艇が多い」
+    「4がまくると5が続く」といった着どうしの結びつきが弱い。コースの組ごとに 実際/予想 の比を作る。
+    p: 学習に使っていないレースの予想(PERMS 順)、Y: 実際の1〜3着のコース。各表は 7×7(a*7+b)。"""
+    ai = np.array([np.where((PERMS == y).all(1))[0][0] for y in Y])
+    q = p.copy()
+    out = []
+    for x, y in PAIRS:
+        idx = PERMS[:, x] * 7 + PERMS[:, y]
+        pred, act = np.zeros(49), np.zeros(49)
+        np.add.at(pred, idx, q.sum(0))
+        np.add.at(act, idx[ai], 1)
+        f = (act + k) / (pred + k)
+        out.append([round(float(v), 4) for v in f])
+        q = q * f[idx][None, :]
+        q /= q.sum(1, keepdims=True)
+    return out
+
+
 def predict_marg(LQ, Z, Y, V, S, KD, coefs, cbias, rows):
     """各コースの1〜3着の確率(3連単120通りから足し合わせ)。"""
     LQ, Z, V, S, KD = LQ[rows], Z[rows], V[rows], S[rows], KD[rows]
@@ -753,6 +794,11 @@ def main():
     for g in DEFAULT_OFF:
         default_mask &= ~(1 << g)
     full = combos[str(default_mask)]
+    # 着どうしの結びつきの補正表(画面で「本命寄り・中間・穴寄り」を選ぶ)。学習に使っていない新しい4割の予想から作る
+    feats_d = [i for g in range(ng) if default_mask >> g & 1 for i in GROUPS[g]]
+    c_d, b_d = fit_logit(LQ_tr, Z, Y, V, S, KD, feats_d, bool(default_mask >> ng & 1), rows=tr)
+    p_te = np.concatenate([predict_perm(LQ_tr, Z, V, S, KD, c_d, b_d, te[i:i + 4000]) for i in range(0, len(te), 4000)])
+    pair = {"k": PAIR_K, "pairs": PAIRS, "t": pair_tables(p_te, Y[te]), "races": int(len(te))}
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, "w", encoding="utf-8") as f:
         json.dump({"month": f"{today:%Y-%m}", "m": M, "races": int(len(Y)),
@@ -764,7 +810,7 @@ def main():
                    "form_days": FORM_DAYS, "form_days_default": FORM_DAYS_DEFAULT, "form_k": {str(k): v for k, v in FORM_K.items()}, "debut_ref": DEBUT_REF,
                    "setsu_base_mask": default_mask & ~(1 << GROUP_NAMES.index("節間成績・調子")),
                    "default_mask": default_mask, "slit_fdelta": FDELTA,
-                   "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2,
+                   "coef": full["coef"], "cbias": full["cbias"], "eval_races": int(len(te)), "bias_version": 2, "pair": pair,
                    "combos": combos}, f, ensure_ascii=False, separators=(",", ":"))
     kim = kim_models(Z, KR, KY, V, prog)
     with open(os.path.join(os.path.dirname(OUT), "kimarite.json"), "w", encoding="utf-8") as f:
