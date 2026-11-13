@@ -2027,7 +2027,7 @@ function kimCardHtml(pred, vname) {
   }).join("");
   return `<div class="card"><h2>予想決まり手</h2>
     <div class="tbl"><table class="cmp"><thead><tr><th>決まり手</th><th>${esc(vname)}の平均</th><th>このレース</th><th>差</th></tr></thead><tbody>${rows}</tbody></table></div>
-    <div class="note">場の平均の決まり手に、各艇の展示タイム・平均ST・決まり手率（3年分）${state.venue === "07" ? "・オリジナル展示" : ""}の差を足して予想しています。平均の1.3倍以上は赤、0.75倍以下は青。検証では、平均だけより決まり手がはっきり当たるようになりました（出目確率そのものには入れていません）。</div></div>`;
+    <div class="note">場の平均の決まり手に、各艇の展示タイム・平均ST・決まり手率（3年分）${["07", "08", "19"].includes(state.venue) ? "・オリジナル展示" : ""}の差を足して予想しています。平均の1.3倍以上は赤、0.75倍以下は青。検証では、平均だけより決まり手がはっきり当たるようになりました（出目確率そのものには入れていません）。</div></div>`;
 }
 // ふだん使う材料の組み合わせ(予報スリットなど、選んだときだけ使う材料を除く)。古い重みファイルは全部
 function defaultMask(model) {

@@ -42,7 +42,7 @@ GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "�
 # 両隣の平均との差(＋は遅い)を自艇・自艇の遅れ側(0未満は0)・外隣・内隣の4つにする。検証で改善が小さいので、ふだんは使わない(画面で選べる)
 SLIT_GROUP = len(GROUPS) - 1
 DEFAULT_OFF = [SLIT_GROUP]
-ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、今は蒲郡のみ)。コースの平均を引いて、速いほど大きくして使う
+ORG = [7, 8, 9]  # オリジナル展示(場独自の計測、蒲郡・常滑・下関)。コースの平均を引いて、速いほど大きくして使う
 FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時のSTが5本未満のときに使う)
 SETSU_K = 6      # 節間成績: 走数が少ないときに0(平均)へ寄せる強さ。値 = 平均 × n/(n+6)
 SETSU_CM = {}    # 場×コースの平均着順(予想がないレースの節間成績に使う。画面にも渡す)
@@ -402,7 +402,7 @@ _org_cache = {}
 def org_of(day, code, no):
     """オリジナル展示 {艇番: {lap, turn, straight}}。過去分(org_past)か、直前情報に保存した分。"""
     import gzip
-    if code != "07":
+    if code not in ("07", "08", "19"):   # オリジナル展示が取れる場(orgtenji.VENUES)
         return {}
     if day not in _org_cache:
         p = os.path.join(DATA, "org_past", f"{day:%Y}", f"{day:%Y%m%d}.json.gz")
