@@ -15,6 +15,9 @@ on:
       maxpages:
         description: "最大ページ数"
         default: "250"
+      raw:
+        description: "生HTML/JSで探す語(正規表現、空なら無し)"
+        default: ""
 jobs:
   probe:
     runs-on: ubuntu-latest
@@ -25,12 +28,15 @@ jobs:
           FIND: ${{ inputs.find }}
           FOLLOW: ${{ inputs.follow }}
           MAXP: ${{ inputs.maxpages }}
+          RAW: ${{ inputs.raw }}
         run: |
           cat > c.py <<'PY'
           import os, re, subprocess, html, collections
           from urllib.parse import urljoin, urlparse, urldefrag
           find = re.compile(os.environ["FIND"]); follow = re.compile(os.environ["FOLLOW"]) if os.environ["FOLLOW"] else None
           maxp = int(os.environ["MAXP"])
+          rawre = re.compile(os.environ["RAW"], re.I) if os.environ.get("RAW") else None
+          jsseen = set()
           def get(u):
               r = subprocess.run(["curl", "-sSL", "-4", "--max-time", "20", "-A", "Mozilla/5.0", u], capture_output=True)
               return r.stdout.decode("utf-8", errors="replace") if r.returncode == 0 else "", r.stdout
@@ -48,6 +54,15 @@ jobs:
               m = find.search(t)
               if m:
                   print(f"HIT {u}\n   {t[max(0, m.start()-200): m.end()+400]}")
+              if rawre:
+                  for mm in list(rawre.finditer(h))[:6]:
+                      print(f"RAW {u}\n   {h[max(0, mm.start()-150): mm.end()+250]!r}")
+                  for js in re.findall(r'src\s*=\s*["\']([^"\']+\.js[^"\']*)', h, re.I):
+                      jv = urljoin(u, js)
+                      if jv in jsseen or urlparse(jv).netloc not in hosts: continue
+                      jsseen.add(jv); jh, _ = get(jv)
+                      for mm in list(rawre.finditer(jh))[:6]:
+                          print(f"JS {jv}\n   {jh[max(0, mm.start()-150): mm.end()+250]!r}")
               for l in re.findall(r'(?:href|src)\s*=\s*["\']([^"\'#]+)', h, re.I):
                   v = urldefrag(urljoin(u, l))[0]
                   if urlparse(v).netloc not in hosts or skip.search(v) or v in seen: continue
