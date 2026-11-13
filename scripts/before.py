@@ -119,7 +119,7 @@ def complete(info):
 
 
 RESULT_URL = "https://www.boatrace.jp/owpc/pc/race/raceresult?rno={rno}&jcd={jcd}&hd={hd}"
-RESULT_FROM, RESULT_TO = 5, 45   # 締切の何分後から何分後まで結果を取りに行くか
+RESULT_FROM, RESULT_TO = 3, 45   # 締切の何分後から何分後まで結果を取りに行くか
 Z2H = str.maketrans("０１２３４５６７８９", "0123456789")
 
 
@@ -158,8 +158,58 @@ def parse_result(html):
     return out
 
 
+
+def save_before(code, no, day, now=None):
+    """1レース分の直前情報を取って data/before/<日付>/<場>_<R>.json に保存する。保存できたら True。"""
+    now = now or dt.datetime.now(JST)
+    outdir = os.path.join(DATA, "before", f"{day:%Y%m%d}")
+    path = os.path.join(outdir, f"{code}_{no:02d}.json")
+    url = URL.format(rno=no, jcd=code, hd=f"{day:%Y%m%d}")
+    r = subprocess.run(["curl", "-sS", "-4", "--max-time", "20",
+                        "-A", "Mozilla/5.0 (personal data collection)", url], capture_output=True)
+    if r.returncode != 0:  # 1レース失敗しても続ける
+        print(f"{VENUES[code]}{no}R: 取得失敗 {r.stderr.decode(errors='replace').strip()}")
+        return False
+    html = r.stdout.decode("utf-8", errors="replace")
+    time.sleep(1)
+    info = parse(html)
+    if not any(e["exh"] is not None for e in info["entries"].values()):
+        print(f"{VENUES[code]}{no}R: 展示前")
+        return False
+    if code in orgtenji.VENUES:  # 場独自のオリジナル展示(一周・まわり足・直線)
+        org = orgtenji.fetch(code, day, no)
+        if org:
+            info["org"] = org
+    done = complete(info) and (code not in orgtenji.VENUES or "org" in info)
+    info.update({"complete": done, "fetched": now.strftime("%H:%M")})
+    os.makedirs(outdir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"{VENUES[code]}{no}R: 保存" + ("" if info["complete"] else "(途中)"))
+    return True
+
+
+def save_result(code, no, day):
+    """1レース分の結果(速報)を取って data/live/<日付>/<場>_<R>_res.json に保存する。保存できたら True。"""
+    outdir = os.path.join(DATA, "live", f"{day:%Y%m%d}")
+    path = os.path.join(outdir, f"{code}_{no:02d}_res.json")
+    r = subprocess.run(["curl", "-sS", "-4", "--max-time", "20", "-A", "Mozilla/5.0 (personal data collection)",
+                        RESULT_URL.format(rno=no, jcd=code, hd=f"{day:%Y%m%d}")], capture_output=True)
+    if r.returncode != 0:
+        return False
+    res = parse_result(r.stdout.decode("utf-8", errors="replace"))
+    if not res["places"]:
+        return False
+    res["complete"] = bool(res["payouts"].get("3連単"))
+    res["time"] = dt.datetime.now(JST).strftime("%H:%M")
+    os.makedirs(outdir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(res, f, ensure_ascii=False, separators=(",", ":"))
+    return True
+
+
 def fetch_live_results(day, now):
-    """締切5〜45分後のレースの結果(速報)を取り、data/live/<日付>/<場>_<R>_res.json に保存する。"""
+    """締切3〜45分後のレースの結果(速報)を取り、data/live/<日付>/<場>_<R>_res.json に保存する。"""
     outdir = os.path.join(DATA, "live", f"{now:%Y%m%d}")
     got = 0
     for code, v in day["venues"].items():
@@ -175,21 +225,23 @@ def fetch_live_results(day, now):
                 with open(path, encoding="utf-8") as f:
                     if json.load(f).get("complete"):
                         continue
-            r = subprocess.run(["curl", "-sS", "-4", "--max-time", "20", "-A", "Mozilla/5.0 (personal data collection)",
-                                RESULT_URL.format(rno=int(no), jcd=code, hd=f"{now:%Y%m%d}")], capture_output=True)
-            if r.returncode != 0:
+            if not save_result(code, int(no), now.date()):
                 continue
-            res = parse_result(r.stdout.decode("utf-8", errors="replace"))
-            if not res["places"]:
-                continue
-            res["complete"] = bool(res["payouts"].get("3連単"))
-            res["time"] = dt.datetime.now(JST).strftime("%H:%M")
-            os.makedirs(outdir, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(res, f, ensure_ascii=False, separators=(",", ":"))
             got += 1
     if got:
-        print(f"結果(速報) {got}レース")
+        print(f"{now:%H:%M} 結果(速報) {got}レース")
+    return got
+
+
+def results_only():
+    """5分ごとの取得の合間に、結果の速報だけを1分ごとに見に行く(結果が早く出るように)。"""
+    now = dt.datetime.now(JST)
+    day_path = os.path.join(DATA, "races", f"{now:%Y}", f"{now:%Y%m%d}.json")
+    if not os.path.exists(day_path):
+        return 0
+    with open(day_path, encoding="utf-8") as f:
+        day = json.load(f)
+    return fetch_live_results(day, now)
 
 
 def fetch_once():
@@ -220,29 +272,8 @@ def fetch_once():
                 with open(path, encoding="utf-8") as f:
                     if json.load(f).get("complete"):
                         continue
-            url = URL.format(rno=int(no), jcd=code, hd=f"{today:%Y%m%d}")
-            r = subprocess.run(["curl", "-sS", "-4", "--max-time", "20",
-                                "-A", "Mozilla/5.0 (personal data collection)", url], capture_output=True)
-            if r.returncode != 0:  # 1レース失敗しても続ける
-                print(f"{VENUES[code]}{no}R: 取得失敗 {r.stderr.decode(errors='replace').strip()}")
-                continue
-            html = r.stdout.decode("utf-8", errors="replace")
-            time.sleep(1)
-            info = parse(html)
-            if not any(e["exh"] is not None for e in info["entries"].values()):
-                print(f"{VENUES[code]}{no}R: 展示前")
-                continue
-            if code in orgtenji.VENUES:  # 場独自のオリジナル展示(一周・まわり足・直線)
-                org = orgtenji.fetch(code, today, int(no))
-                if org:
-                    info["org"] = org
-            done = complete(info) and (code not in orgtenji.VENUES or "org" in info)
-            info.update({"complete": done, "fetched": now.strftime("%H:%M")})
-            os.makedirs(outdir, exist_ok=True)
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(info, f, ensure_ascii=False, separators=(",", ":"))
-            got += 1
-            print(f"{VENUES[code]}{no}R: 保存" + ("" if info["complete"] else "(途中)"))
+            if save_before(code, int(no), today, now):
+                got += 1
     print(f"{now:%H:%M} 直前情報 {got}件")
     try:
         fetch_live_odds(day, now)
@@ -311,7 +342,15 @@ def main():
         if time.time() - start > limit * 60:
             print("時間になったので終了(次の実行に引き継ぎ)")
             break
-        time.sleep(max(30, 300 - (time.time() - t_cycle)))  # 5分ごと(取得にかかった時間を差し引く)
+        # 次の5分ごとの取得までは、1分ごとに結果の速報だけを見る
+        while time.time() - t_cycle < 300 - 60:
+            time.sleep(60)
+            try:
+                if results_only():
+                    push()
+            except Exception as e:
+                print(f"結果(速報)失敗 {e}")
+        time.sleep(max(5, 300 - (time.time() - t_cycle)))
 
 
 

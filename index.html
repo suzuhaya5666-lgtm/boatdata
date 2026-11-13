@@ -1074,9 +1074,9 @@ async function drawResultTab(v, race) {
     quick = await getLive(state.date.replace(/-/g, ""), state.venue, race.no, "_res");
     if (state.dtab !== "result") return;
     if (!quick?.places?.length) {
-      $("view-race").innerHTML = `<div class="empty">結果はまだです。<br>レース後5〜45分の間に5分ごとに速報を取り込みます（正式な結果は夜と朝の取り込みで入ります）。
+      $("view-race").innerHTML = `<div class="empty">結果はまだです。<br>締切3〜45分後の間、1分ごとに速報を取り込みます（「結果取得」でその場で取りに行けます）（正式な結果は夜と朝の取り込みで入ります）。
         <br><button class="pill2" id="rreload" style="margin-top:10px">⟳ 結果取得</button></div>`;
-      $("rreload").onclick = () => { $("rreload").textContent = "読み込み中…"; drawResultTab(v, race0); };
+      bindResultFetch(v, race0, null);
       return;
     }
     const pl = Object.fromEntries(quick.places.map((x) => [x.boat, x.place]));
@@ -1154,7 +1154,21 @@ async function drawResultTab(v, race) {
     </div>
     ${pay ? `<div class="card"><h2>払戻金</h2>${pay}</div>` : ""}
     <div class="card"><h2>オッズ</h2>${oddsHtml}</div>`;
-  const rr = $("rreload"); if (rr) rr.onclick = () => { rr.textContent = "読み込み中…"; drawResultTab(v, race0); };
+  bindResultFetch(v, race0, quick);
+}
+function bindResultFetch(v, race0, quick) {
+  const rr = $("rreload"); if (!rr) return;
+  const hd = state.date.replace(/-/g, "");
+  rr.onclick = async () => {
+    rr.disabled = true;
+    const before = quick?.time || null;
+    const got = await fetchNow("result", state.venue, race0.no, hd, rr, async () => {
+      const q = await getLive(hd, state.venue, race0.no, "_res");
+      return q?.places?.length && q.time !== before ? q : null;
+    });
+    rr.disabled = false;
+    if (got && state.dtab === "result") drawResultTab(v, race0);
+  };
 }
 
 // ---------------------------------------------------------------- オッズタブ
@@ -1483,11 +1497,58 @@ function openMemo(v, race, od) {
 const RAW = "https://raw.githubusercontent.com/suzuhaya5666-lgtm/boatdata/main/";
 async function getBefore(hd, venue, no) {
   const path = `data/before/${hd}/${venue}_${String(no).padStart(2, "0")}.json`;
+  try {  // raw.githubusercontent.com は最大5分古いことがあるので、先に API で最新を読む
+    const r = await fetch(`https://api.github.com/repos/suzuhaya5666-lgtm/boatdata/contents/${path}?ref=main`,
+      { headers: { Accept: "application/vnd.github.raw" }, cache: "no-store" });
+    if (r.ok) return await r.json();
+  } catch (e) { /* 次へ */ }
   try {
     const r = await fetch(RAW + path, { cache: "no-store" });
     if (r.ok) return await r.json();
   } catch (e) { /* 読めなければサイト側を見る */ }
   return getJSON(path).catch(() => null);
+}
+
+// ---------------------------------------------------------------- 取得ボタン: GitHub Actions(fetch.yml)をその場で動かす
+// 公式サイトは画面から直接読めない(CORS)ので、GitHub 側で1レース分だけ取って保存してもらう。
+// そのために GitHub のトークン(boatdata の Actions 読み書きだけ許可したもの)を、この端末にだけ保存する。
+const TOKEN_KEY = "gh_fetch_token";
+function ghToken(ask) {
+  let t = store.get(TOKEN_KEY);
+  if (!t && ask) {
+    t = (window.prompt("取得ボタンを使うには GitHub のトークンが1回だけ必要です。\n（boatdata の Actions: Read and write だけを許可した Fine-grained token）\nトークンを貼り付けてください。この端末にだけ保存されます。") || "").trim();
+    if (t) store.set(TOKEN_KEY, t);
+  }
+  return t || null;
+}
+// kind: before / result。check() が新しいデータを返したら終わり。btn の文字で進み具合を出す
+async function fetchNow(kind, venue, no, hd, btn, check) {
+  const token = ghToken(true);
+  if (!token) return check();  // トークンなし: 保存済みのものを読み直すだけ
+  const say = (t) => { if (btn) btn.textContent = t; };
+  say("取得を依頼中…");
+  try {
+    const r = await fetch("https://api.github.com/repos/suzuhaya5666-lgtm/boatdata/actions/workflows/fetch.yml/dispatches", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, Accept: "application/vnd.github+json" },
+      body: JSON.stringify({ ref: "main", inputs: { kind, venue, race: String(no), date: hd } }),
+    });
+    if (r.status === 401 || r.status === 403 || r.status === 404) {
+      store.set(TOKEN_KEY, "");
+      say("トークンが使えません（もう一度押して入れ直し）");
+      return null;
+    }
+    if (!r.ok) { say(`依頼に失敗（${r.status}）`); return null; }
+  } catch (e) { say("依頼に失敗（通信）"); return null; }
+  const t0 = Date.now();
+  while (Date.now() - t0 < 150000) {  // 最長2分半待つ(起動に30秒〜1分かかる)
+    await new Promise((ok) => setTimeout(ok, 8000));
+    say(`取得中… ${Math.round((Date.now() - t0) / 1000)}秒`);
+    const got = await check();
+    if (got) return got;
+  }
+  say("まだ公開されていないようです（⟳ もう一度）");
+  return null;
 }
 
 // 節間のまとめ(data/series): 節間成績(5場)と、蒲郡の節間平均の展示・オリ展(展示前だけ)。直前情報に series として添える
@@ -1775,7 +1836,7 @@ async function drawExhTab(v, race, keepPos) {
       <span>気温 ${w.air ?? "-"}℃</span><span>水温 ${w.water ?? "-"}℃</span></div>` : "";
   const status = bi ? `取得 ${esc(bi.fetched || "")}${bi.complete ? "" : "（途中）"}`
     : hasResult ? "直前情報は取れていません。展示タイムと進入は結果ファイルの値です。"
-      : "直前情報はまだありません。締切の45分前から10分ごとに取りに行きます。";
+      : "直前情報はまだありません。締切の45分前から5分ごとに取りに行きます（「展示取得」でその場で取りに行けます）。";
   $("view-race").innerHTML = `
     <div class="card">
       <h2>展示情報</h2>
@@ -1783,10 +1844,22 @@ async function drawExhTab(v, race, keepPos) {
       <div class="tbl"><table class="cmp exh"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>展示<br>タイム</th>${org ? OK.map(([, l]) => `<th>${l}</th>`).join("") : ""}${hv ? "<th>合計<br>偏差値</th>" : ""}
         <th>${order === bi?.start ? "展示ST" : "ST"}</th><th>チルト</th><th>プロペラ</th><th>部品交換</th><th>体重</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
+      <div class="orow"><span class="otime">${bi ? `取得 ${esc(bi.fetched || "")}${bi.complete ? "" : "（途中）"}` : "未取得"}</span><button class="pill2" id="ereload">⟳ 展示取得</button></div>
       <div class="note">${order ? `並びは${orderLabel}のコース順です（号艇の数字はそのまま）。` : ""}展示タイムは1番を赤、2番を黄。${org ? "一周・まわり足・直線は場独自の計測（オリジナル展示）で、どれも小さいほど良く、1番を赤、2番を黄。" : ""}${hv ? "合計偏差値は、展示タイムとオリジナル展示3つをコースの平均との差にしてから、このレースの6艇の中で比べたもの（50が平均、速いほど高い）。60以上は濃い赤、55以上は赤、45未満は青。" : ""}${status}</div>
     </div>${hz ? hensaCard(hz, hv, courseOf) : ""}`;
   if (keepY != null) window.scrollTo(0, keepY);
   $("view-race").querySelectorAll("[data-hkey]").forEach((b) => b.onclick = () => { state.hensaKey = b.dataset.hkey; drawExhTab(v, race, true); });
+  const eb = $("ereload");
+  if (eb) eb.onclick = async () => {
+    eb.disabled = true;
+    const prev = bi ? JSON.stringify(bi.entries) + (bi.fetched || "") + JSON.stringify(bi.org || null) : null;
+    const got = await fetchNow("before", state.venue, race.no, hd, eb, async () => {
+      const x = await getBefore(hd, state.venue, race.no);
+      return x && JSON.stringify(x.entries) + (x.fetched || "") + JSON.stringify(x.org || null) !== prev ? x : null;
+    });
+    eb.disabled = false;
+    if (got && state.dtab === "exh") drawExhTab(v, race, true);
+  };
 }
 
 // 偏差値ごとの着率表(3年分)。このレースの各艇が入る段に印をつける

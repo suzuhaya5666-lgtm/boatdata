@@ -1,0 +1,45 @@
+name: fetch
+
+# 画面の「展示取得」「結果取得」「オッズ取得」ボタンから呼ばれる。1レース分だけその場で取って保存する。
+run-name: "取得 ${{ inputs.kind }} ${{ inputs.venue }} ${{ inputs.race }}R"
+
+on:
+  workflow_dispatch:
+    inputs:
+      kind:
+        description: "before(展示) / result(結果) / odds(オッズ)"
+        required: true
+        default: "result"
+      venue:
+        description: "場コード(07 など)"
+        required: true
+      race:
+        description: "レース番号"
+        required: true
+      date:
+        description: "日付 YYYYMMDD(空なら今日)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 取得して保存
+        env:
+          KIND: ${{ inputs.kind }}
+          VENUE: ${{ inputs.venue }}
+          RACE: ${{ inputs.race }}
+          HD: ${{ inputs.date }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python -u scripts/fetch_now.py --kind "$KIND" --venue "$VENUE" --race "$RACE" --date "$HD"
