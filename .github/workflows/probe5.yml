@@ -1,0 +1,41 @@
+name: probe5
+# 調査用: ページの生HTMLから、正規表現の前後を広めに出す(保存しない)
+on:
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: "URL(空白区切り)"
+        required: true
+      re:
+        description: "正規表現"
+        required: true
+      win:
+        description: "後ろに出す文字数"
+        default: "3000"
+      maxhits:
+        default: "3"
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          URLS: ${{ inputs.urls }}
+          RE: ${{ inputs.re }}
+          WIN: ${{ inputs.win }}
+          MH: ${{ inputs.maxhits }}
+        run: |
+          cat > p.py <<'PY'
+          import os, re, subprocess
+          for u in os.environ["URLS"].split():
+              r = subprocess.run(["curl", "-sSL", "-4", "--max-time", "40", "-A", "Mozilla/5.0", "-w", "\n@@%{http_code}", u], capture_output=True)
+              raw = r.stdout
+              h = raw.decode("utf-8", errors="replace")
+              if "shift_jis" in h[:3000].lower() or "sjis" in h[:3000].lower(): h = raw.decode("cp932", errors="replace")
+              print(f"######## {u} {len(h)} {h[-6:]}")
+              hits = list(re.finditer(os.environ["RE"], h, re.I))[:int(os.environ["MH"])]
+              for m in hits:
+                  s = h[max(0, m.start()-200): m.end()+int(os.environ["WIN"])]
+                  s = re.sub(r"[ \t\r]+", " ", s); s = re.sub(r"\n\s*\n+", "\n", s)
+                  print("----HIT\n" + s)
+          PY
+          python3 p.py
