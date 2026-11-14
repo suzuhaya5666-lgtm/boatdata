@@ -40,7 +40,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python -u scripts/before_past.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --codes "${{ inputs.codes }}" --max-minutes 320 --workers 4 | tee out.log
+          python -u scripts/before_past.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --codes "${{ inputs.codes }}" --max-minutes 320 --workers 8 | tee out.log
           if grep -q "残り 0件" out.log; then echo "left=0" >> $GITHUB_OUTPUT; else echo "left=1" >> $GITHUB_OUTPUT; fi
       - name: 続きを動かす
         if: steps.run.outputs.left == '1' && inputs.chain == 'true'
