@@ -2706,7 +2706,7 @@ async function renderBets() {
   if (BT.src === "user") {
     races = await userRaces();
     pend = races.filter((r) => !r.done).length;
-    rows = races.filter((r) => r.done).map((r) => ({ date: r.date, code: r.code, inv: r.inv, ret: r.ret, invB: r.invB, retB: r.retB }));
+    rows = races.filter((r) => r.done).map((r) => ({ date: r.date, code: r.code, inv: r.inv, ret: r.ret, invB: r.invB, retB: r.retB, hit: r.ret > 0 ? 1 : 0, n: r.inv > 0 ? 1 : 0 }));
   } else if (pnl) {
     if (!pnl.strategies.some((s) => s[0] === BT.strat)) BT.strat = pnl.strategies[0][0];
     Object.entries(pnl.days).forEach(([date, vs]) => Object.entries(vs).forEach(([code, x]) => {
@@ -2732,7 +2732,7 @@ async function renderBets() {
   const money = (a, big) => {
     const pl = a.ret - a.inv, plB = a.retB - a.invB;
     return `<b class="${pmc(pl)} ${big ? "bbig" : ""}">${yenT(pl)}</b>${user ? ` <span class="${pmc(plB)} bpar">(${yenT(plB)})</span>` : ""}
-      <small class="cnt">回収率 ${a.inv ? Math.round(a.ret / a.inv * 100) : "-"}%</small>`;
+      <small class="cnt">的中 ${a.hit}/${a.n}${a.n ? `（${Math.round(a.hit / a.n * 100)}%）` : ""}・回収率 ${a.inv ? Math.round(a.ret / a.inv * 100) : "-"}%</small>`;
   };
   const sel = (id, opts, v) => `<select id="${id}" class="bsel">${opts.map(([k, t]) => `<option value="${k}" ${String(k) === String(v) ? "selected" : ""}>${t}</option>`).join("")}</select>`;
 
@@ -2812,15 +2812,15 @@ function openVenuePnl(rows, user) {
   const f = { all: () => true, year: (r) => r.date.startsWith(String(BT.year)), month: (r) => r.date.startsWith(ym) }[BT.vmode];
   const by = {};
   rows.filter(f).forEach((r) => {
-    const a = by[r.code] = by[r.code] || { inv: 0, ret: 0, invB: 0, retB: 0, days: new Set() };
-    a.inv += r.inv; a.ret += r.ret; a.invB += r.invB || 0; a.retB += r.retB || 0; a.days.add(r.date);
+    const a = by[r.code] = by[r.code] || { inv: 0, ret: 0, invB: 0, retB: 0, hit: 0, n: 0, days: new Set() };
+    a.inv += r.inv; a.ret += r.ret; a.invB += r.invB || 0; a.retB += r.retB || 0; a.hit += r.hit || 0; a.n += r.n || 0; a.days.add(r.date);
   });
   const list = Object.entries(by).sort((a, b) => (b[1].ret - b[1].inv) - (a[1].ret - a[1].inv));
   const body = list.map(([c, a]) => {
     const pl = a.ret - a.inv, plB = a.retB - a.invB;
     return `<tr><td class="name">${esc(vname(c))}<br><small class="cnt">${a.days.size}日</small></td>
       <td class="y">${a.inv.toLocaleString()}<br><small class="cnt">${a.ret.toLocaleString()}</small></td>
-      <td class="y">${a.inv ? Math.round(a.ret / a.inv * 100) : "-"}%</td>
+      <td class="y">${a.inv ? Math.round(a.ret / a.inv * 100) : "-"}%<br><small class="cnt">${a.hit}/${a.n}</small></td>
       <td class="y"><b class="${pmc(pl)}">${yenT(pl)}</b>${user ? `<br><small class="${pmc(plB)}">(${yenT(plB)})</small>` : ""}</td></tr>`;
   }).join("");
   $("modal").hidden = false;
@@ -2828,7 +2828,7 @@ function openVenuePnl(rows, user) {
     <h2>場ごと収支 <small style="color:var(--sub)">${BT.src === "user" ? "ユーザー" : "集計用予想"}</small></h2>
     <div class="seg">${[["all", "総合"], ["year", `年間（${BT.year}年）`], ["month", `月間（${BT.year}年${BT.month}月）`]].map(([k, t]) =>
       `<button class="pill2 ${BT.vmode === k ? "on" : ""}" data-vm="${k}">${t}</button>`).join("")}</div>
-    <div class="tbl"><table class="cmp bvt"><thead><tr><th>場</th><th>投資<br><small>払戻</small></th><th>回収率</th><th>収支</th></tr></thead>
+    <div class="tbl"><table class="cmp bvt"><thead><tr><th>場</th><th>投資<br><small>払戻</small></th><th>回収率<br><small>的中</small></th><th>収支</th></tr></thead>
       <tbody>${body || '<tr><td colspan="4" class="cnt">この期間の収支はありません</td></tr>'}</tbody></table></div>
     <div class="note">年間・月間は、収支タブで選んでいる年と月です。</div>`;
   $("mclose").onclick = closeModal;
