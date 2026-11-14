@@ -820,7 +820,7 @@ setInterval(() => {
 function drawDetail() {
   const v = state.day.venues[state.venue];
   const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
-  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["odds", "オッズ"], ["deme", "出目確率"], ["result", "結果"]];
+  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["odds", "オッズ"], ["deme", "出目確率"], ["bet", "検証買目"], ["result", "結果"]];
   state.dtab = state.dtab || "card";
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
@@ -839,6 +839,7 @@ function drawDetail() {
   if (state.dtab === "deme") return drawDemeTab(v, race);
   if (state.dtab === "result") return drawResultTab(v, race);
   if (state.dtab === "odds") return drawOddsTab(v, race);
+  if (state.dtab === "bet") return drawBetTab(v, race);
   drawCardTab(v, race);
 }
 
@@ -1105,6 +1106,96 @@ async function getOdds(hd, venue, no) {
     if (r.ok) return await r.json();
   } catch (e) { /* なし */ }
   return getJSON(path).catch(() => null);
+}
+
+// ---------------------------------------------------------------- 検証買目
+// 振り返り用に保存している予想(data/pred)の買い目を、買い方(収支の「集計用予想」と同じ)ごとに出す。
+// 締切までは30秒ごとに読み直す(買い目はオッズを取り直すたびに作り直され、締切で固定)。
+const BET_STRATS = [
+  ["post_hon", "展示後 本命", "展示後の本命3点(3連単)"], ["pre_hon", "展示前 本命", "展示前の本命3点(3連単)"],
+  ["post_ex1", "展示後 2連単", "展示後の2連単本命1点"], ["pre_ex1", "展示前 2連単", "展示前の2連単本命1点"],
+  ["bal", "バランス", "展示後のバランス(最大5点)"], ["ex", "2連単期待値", "展示後の2連単期待値1点(期待値1.2以上)"],
+  ["ex_sw", "2連単期待値 流し切替", "3連単4点流しの合成オッズの方が高ければ3連単に切替(1レース1000円)"],
+  ["ana", "穴", "展示後の穴(最大5点)"], ["ana12", "穴12点", "穴12点・期待値が最大の形"],
+  ["ana12_f5", "穴12点(5倍↑)", "穴12点・1番人気5倍以上のレースだけ"],
+  ["ex3_10sw", "1位固定 10%切替", "2連単1位固定・10%削り・2連単の方が高ければ2連単に切替"], ["ex3_20", "1位固定 20%", "2連単1位固定・20%削り(3連単だけ)"]];
+function betSplit(odds, total = 1000) {
+  const inv = odds.map((o) => 1 / o), sm = inv.reduce((a, b) => a + b, 0);
+  const amt = inv.map((x) => Math.max(100, Math.round(total * x / sm / 100) * 100));
+  while (amt.reduce((a, b) => a + b, 0) > total && Math.max(...amt) > 100) amt[amt.indexOf(Math.max(...amt))] -= 100;
+  return amt;
+}
+function betsOf(pre, post, live) {
+  const out = {}, ks = (l) => (l || []).filter((z) => z && z.k).map((z) => z.k);
+  const put = (name, items) => { if (items.length) out[name] = items; };   // items: [[買い目, 金額, オッズ]]
+  const o3 = live?.["3t"] || {}, o2 = live?.["2t"] || {};
+  const tri = (name, l) => put(name, (l || []).filter((z) => z && z.k).map((z) => [z.k, 100, z.o ?? o3[z.k] ?? null]));
+  if (pre) { tri("pre_hon", pre.hon); const e = (pre.ex1 || [])[0]; if (e) put("pre_ex1", [[e.k, 100, e.o ?? null]]); }
+  if (post) {
+    tri("post_hon", post.hon);
+    const e1 = (post.ex1 || [])[0]; if (e1) put("post_ex1", [[e1.k, 100, e1.o ?? null]]);
+    tri("bal", post.bal);
+    const ex = (post.ex || [])[0];
+    if (ex) {
+      put("ex", [[ex.k, 100, ex.o ?? null]]);
+      const z = (post.ex1 || []).find((x) => x && x.k === ex.k), ks3 = [1, 2, 3, 4, 5, 6].filter((x) => !ex.k.split("-").includes(String(x))).map((x) => `${ex.k}-${x}`);
+      if (z?.syn && z?.o && z.syn > z.o && ks3.every((k) => o3[k])) { const a = betSplit(ks3.map((k) => o3[k])); put("ex_sw", ks3.map((k, i) => [k, a[i], o3[k]])); }
+      else put("ex_sw", [[ex.k, 1000, ex.o ?? null]]);
+    }
+    tri("ana", post.ana);
+    const a = post.ana12;
+    if (a && a[a.best]) { put("ana12", a[a.best].k.map((k) => [k, 100, o3[k] ?? null])); if ((post.fav || 0) >= 5) out.ana12_f5 = out.ana12; }
+    const e = post.ex3;
+    if (e) {
+      const c10 = ks(e.cut10);
+      if (c10.length && e.o2 && e.cut10_syn) out.ex3_10sw = e.o2 > e.cut10_syn ? [[e.k, 100 * c10.length, e.o2]] : (e.cut10 || []).map((z) => [z.k, 100, z.o ?? null]);
+      tri("ex3_20", e.cut20);
+    }
+  }
+  return out;
+}
+let betTimer = null;
+async function drawBetTab(v, race, silent) {
+  if (!silent) loading();
+  clearTimeout(betTimer);
+  const hd = state.date.replace(/-/g, ""), key = `${state.venue}_${race.no}`;
+  let pr = null, live = null, res = null;
+  try { const r = await fetch(RAW + `data/pred/${hd}/${state.venue}.json`, { cache: "no-store" }); if (r.ok) pr = await r.json(); } catch (e) { /* なし */ }
+  const slot = pr?.races?.[race.no] || pr?.races?.[String(race.no)];
+  const now = nowJST(), closed = state.date < now.date || (state.date === now.date && race.deadline && now.time.slice(0, 5) >= race.deadline);
+  live = await getLiveRaw(hd, state.venue, race.no);
+  let po = hasPay(race.payouts) ? race.payouts : null;
+  if (!po && closed) { const q = await liveRes(state.date, state.venue, race.no); if (hasPay(q?.payouts)) po = q.payouts; }
+  if (state.dtab !== "bet" || `${state.venue}_${state.race}` !== key) return;
+  if (!slot) {
+    $("view-race").innerHTML = '<div class="empty">このレースの検証用の予想はまだありません。<br>朝の出走表のあと、展示前の予想が入ります。</div>';
+  } else {
+    const r3 = po?.["3連単"]?.[0]?.combo, r2 = po?.["2連単"]?.[0]?.combo;
+    const payOf = (k, amt) => { const t = k.split("-").length === 3 ? "3連単" : "2連単"; const e = (po?.[t] || []).find((x) => x.combo === k); return e ? Math.round(e.yen * amt / 100) : 0; };
+    const bets = betsOf(slot.pre, slot.post, live);
+    const bb = (b) => `<span class="mini k${b}">${b}</span>`;
+    const cmb = (k) => k.split("-").map(Number).map(bb).join("-");
+    const post = slot.post;
+    const status = !post ? "展示前の予想だけです（展示が出ると展示後の買い目が入ります）"
+      : closed ? `締切で確定（${esc(post.odds || post.time || "")} のオッズで決定）`
+      : `締切まで更新中・${esc(post.odds ? post.odds + " のオッズ" : post.time + " の予想")}（30秒ごとに読み直し）`;
+    const cards = BET_STRATS.map(([k, name, desc]) => {
+      const it = bets[k];
+      if (!it) return `<tr><td class="name">${esc(name)}</td><td colspan="3" class="cnt">${(k.startsWith("pre") || post) ? "買わず" : "展示後に決まります"}</td></tr>`;
+      const inv = it.reduce((a, x) => a + x[1], 0), ret = po ? it.reduce((a, x) => a + payOf(x[0], x[1]), 0) : null;
+      return `<tr class="${ret > 0 ? "bhit" : ""}"><td class="name">${esc(name)}<br><small class="cnt">${inv.toLocaleString()}円</small></td>
+        <td>${it.map(([kk, amt, o]) => `<div class="${po && payOf(kk, amt) > 0 ? "plus" : ""}">${cmb(kk)} <small class="cnt">${kk.split("-").length === 3 ? "3単" : "2単"}${amt !== 100 ? " " + amt + "円" : ""}${o ? " " + o + "倍" : ""}</small></div>`).join("")}</td>
+        <td class="y">${ret == null ? "-" : ret ? `<b class="plus">${ret.toLocaleString()}</b>` : "0"}</td></tr>`;
+    }).join("");
+    $("view-race").innerHTML = `
+      <div class="card"><h2>検証買目 ${race.no}R</h2>
+        <div class="meta"><span>${status}</span>${r3 ? `<span>結果 ${esc(r3)}</span>` : ""}</div>
+        <div class="tbl"><table class="cmp bdt"><thead><tr><th>買い方</th><th>買い目</th><th>払戻</th></tr></thead><tbody>${cards}</tbody></table></div>
+        <div class="note">収支タブの「集計用予想」で数えている買い目です。1点100円（流し切替は1レース1000円を払戻がそろうように配分）。オッズは買い目を決めた時点の値。展示後の買い目は、締切20分前から5分ごと、締切6分前からは30秒ごとに作り直され、締切の時刻で固定されます。</div>
+        ${post ? `<div class="meta" style="margin-top:6px"><span>逃げ ${Math.round((post.nige || 0) * 100)}%</span>${post.are ? `<span>${esc(post.are)}</span>` : ""}${post.fav ? `<span>1番人気 ${post.fav}倍</span>` : ""}</div>` : ""}
+      </div>`;
+  }
+  if (!closed || (closed && !po)) betTimer = setTimeout(() => { if (state.dtab === "bet" && `${state.venue}_${state.race}` === key && state.screen === "detail") drawBetTab(v, race, true); }, 30000);
 }
 
 async function drawResultTab(v, race) {
