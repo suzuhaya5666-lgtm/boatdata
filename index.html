@@ -308,6 +308,8 @@
   .bcell .bv2 { font-size: 9.5px; letter-spacing: -.3px; white-space: nowrap; font-weight: 400; }
   table.bvt td, table.bdt td { padding: 6px 4px; } table.bvt td.y, table.bdt td.y { text-align: right; font-variant-numeric: tabular-nums; }
   table.bdt tr.bhit td { background: #fff4e6; }
+  tr.srow { cursor: pointer; }
+  tr.srow:active td { background: #eef4ff; }
   table.bdt tr[data-dst], table.bcmp tr[data-bst] { cursor: pointer; }
   table.bcmp th { font-size: 12px; text-align: center; } table.bcmp td.name { white-space: normal; min-width: 96px; }
   table.brt tr.bvh td { background: #eef2f7; font-weight: 800; padding: 5px 8px; }
@@ -339,10 +341,12 @@
 <main id="view-venue" hidden></main>
 <main id="view-notes" hidden></main>
 <main id="view-bets" hidden></main>
+<main id="view-search" hidden></main>
 
 <nav>
   <button class="on" data-view="race">レース</button>
   <button data-view="venue">場データ</button>
+  <button data-view="search">選手</button>
   <button data-view="notes">解析ノート</button>
   <button data-view="bets">収支</button>
 </nav>
@@ -2636,7 +2640,9 @@ document.querySelectorAll("nav button").forEach((b) => b.addEventListener("click
   $("view-venue").hidden = state.tab !== "venue";
   $("view-bets").hidden = state.tab !== "bets";
   $("view-notes").hidden = state.tab !== "notes";
+  $("view-search").hidden = state.tab !== "search";
   draw();
+  if (state.tab === "search") renderSearch();
   if (state.tab === "venue") renderVenue();
   if (state.tab === "notes") renderNotes();
   if (state.tab === "bets") renderBets();
@@ -3022,6 +3028,55 @@ function st34Table(rows) {
     <div class="note">各コースで1着率が一番高い段をピンクにしています。</div>`;
 }
 
+// ---------------------------------------------------------------- 選手検索
+// data/stats/racer_index.json: [登番, 名前, 級別, 支部, 年齢, 最後に走った日, 直近1年の出走数]
+const SR = { q: "", cls: "all" };
+const normName = (s) => String(s || "").replace(/[\s　]/g, "");
+function seenRacers() { try { return JSON.parse(store.get("seenRacers") || "[]"); } catch (e) { return []; } }
+function addSeen(regno, name) {
+  const a = seenRacers().filter((x) => x[0] !== regno);
+  a.unshift([regno, name]); store.set("seenRacers", JSON.stringify(a.slice(0, 12)));
+}
+async function renderSearch() {
+  const box = $("view-search");
+  if (!box.dataset.ready) {
+    box.innerHTML = `<div class="card"><h2>選手検索</h2>
+      <input id="sq" type="search" placeholder="名前か登番（例: 峰 / 4320）" autocomplete="off"
+        style="width:100%;box-sizing:border-box;font-size:16px;padding:10px 12px;border:1px solid var(--line,#d0d5dd);border-radius:10px">
+      <div class="pills" id="scls" style="margin-top:8px"></div>
+      <div class="note">名前は漢字で入れてください（ふりがなでは探せません）。名字だけ・名前の一部でも探せます。直近1年に5場以外も含めて走った選手が対象です。</div></div>
+      <div id="sres"></div>`;
+    box.dataset.ready = "1";
+    $("sq").value = SR.q;
+    $("sq").addEventListener("input", (ev) => { SR.q = ev.target.value; drawSearch(); });
+  }
+  drawSearch();
+}
+async function drawSearch() {
+  let ix;
+  try { ix = await cached("data/stats/racer_index.json"); } catch (e) { ix = null; }
+  if (!ix) { $("sres").innerHTML = '<div class="empty">選手の一覧がまだありません。</div>'; return; }
+  const CL = [["all", "すべて"], ["A1", "A1"], ["A2", "A2"], ["B1", "B1"], ["B2", "B2"]];
+  $("scls").innerHTML = CL.map(([k, l]) => `<button class="pill2 ${SR.cls === k ? "on" : ""}" data-scl="${k}">${l}</button>`).join("");
+  $("scls").querySelectorAll("[data-scl]").forEach((b) => b.onclick = () => { SR.cls = b.dataset.scl; drawSearch(); });
+  const q = normName(SR.q);
+  const row = (r) => `<tr class="srow" data-sreg="${r[0]}"><td><b>${esc(r[1])}</b><br><small class="cnt">${r[0]}</small></td>
+    <td>${esc(r[2] || "-")}</td><td>${esc(r[3] || "-")}</td><td>${r[4] ?? "-"}</td><td><small>${esc((r[5] || "").slice(5))}</small></td></tr>`;
+  let html = "";
+  if (!q) {
+    const seen = seenRacers();
+    html = seen.length ? `<div class="card"><h2>最近見た選手</h2><div class="tbl"><table class="cmp"><tbody>${seen.map(([reg, nm]) =>
+      `<tr class="srow" data-sreg="${reg}"><td><b>${esc(nm)}</b> <small class="cnt">${reg}</small></td></tr>`).join("")}</tbody></table></div></div>` : "";
+  } else {
+    const hit = ix.racers.filter((r) => (SR.cls === "all" || r[2] === SR.cls) && (/^\d+$/.test(q) ? r[0].startsWith(q) : normName(r[1]).includes(q)));
+    html = `<div class="card"><h2>${hit.length}人${hit.length > 60 ? "（60人まで表示）" : ""}</h2>
+      ${hit.length ? `<div class="tbl"><table class="cmp"><thead><tr><th>選手</th><th>級別</th><th>支部</th><th>年齢</th><th>最終出走</th></tr></thead>
+        <tbody>${hit.slice(0, 60).map(row).join("")}</tbody></table></div>` : '<div class="empty">見つかりませんでした</div>'}</div>`;
+  }
+  $("sres").innerHTML = html;
+  $("sres").querySelectorAll("[data-sreg]").forEach((t) => t.onclick = () => openRacer(t.dataset.sreg, 1));
+}
+
 async function openRacer(regno, course) {
   $("modal").hidden = false;
   $("sheet").innerHTML = '<div class="empty">読み込み中…</div>';
@@ -3049,6 +3104,7 @@ async function openRacer(regno, course) {
     $("sheet").innerHTML = `
       <button class="close" id="mclose">閉じる</button>
       <h2>${esc(r.name)} <small style="color:var(--sub)">${r.regno}</small></h2>
+      ${r.prof ? `<div class="meta"><span><b>${esc(r.prof.class || "-")}</b></span><span>${esc(r.prof.branch || "")}</span>${r.prof.age ? `<span>${r.prof.age}歳</span>` : ""}${r.prof.weight ? `<span>${r.prof.weight}kg</span>` : ""}${r.prof.nat_win ? `<span>全国勝率 ${r.prof.nat_win}</span>` : ""}${r.prof.nat_2 ? `<span>2連率 ${r.prof.nat_2}%</span>` : ""}</div>` : ""}
       <div class="meta"><span>${r.period.from}〜${r.period.to}</span><span>出走 ${total}</span><span>F ${sh.f}回</span></div>
       ${chipRow("sg", gradeOpts(r.female), state.g)}
       <div class="card" style="margin-top:10px"><h2>コース別全艇成績</h2>
@@ -3062,11 +3118,16 @@ async function openRacer(regno, course) {
         <div class="note">フライング・出遅れは平均から除いています。スロー・ダッシュはコース番号(1〜3/4〜6)で分けています。</div>
       </div>
       ${maeCard(r.regno)}
+      ${r.recent?.length ? `<div class="card"><h2>直近の出走</h2>
+        <div class="tbl"><table class="cmp"><thead><tr><th>日付</th><th>場</th><th>枠</th><th>コース</th><th>ST</th><th>着</th></tr></thead><tbody>${r.recent.map(([d, v, c, p, st, b, stt]) =>
+          `<tr class="${p === 1 ? "bhit" : ""}"><td><small>${esc(d.slice(2).replace(/-/g, "/"))}</small></td><td>${esc(v)}</td><td>${b ?? "-"}</td><td>${c ?? "-"}</td><td>${esc(st || "-")}</td><td><b>${p ?? esc(stt || "-")}</b></td></tr>`).join("")}</tbody></table></div>
+        <div class="note">新しい順に20走（5場以外も含む）。</div></div>` : ""}
       <div class="note keep">出走場: ${Object.entries(r.venues).map(([k, n]) => `${esc(k)}${n}`).join("・")}</div>`;
     $("mclose").onclick = closeModal;
     $("sheet").querySelectorAll("[data-c]").forEach((b) => b.addEventListener("click", () => draw(Number(b.dataset.c))));
     $("sg").querySelectorAll("button").forEach((b) => b.onclick = () => { state.g = b.dataset.p; draw(c); });
   };
+  addSeen(r.regno, r.name);
   draw(Number(course) || 1);
 }
 function closeModal() { $("modal").hidden = true; }

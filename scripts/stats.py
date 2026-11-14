@@ -354,6 +354,7 @@ def main():
 
     # ---- 選手・モーターの記録
     hist, names, venues_count, motors = {}, {}, {}, {}
+    prof = {}   # 選手の級別・支部・年齢など(出走表に載った一番新しい値)
     for date, code, race, ents, cat in races:
         km = race.get("kimarite")
         winner = next((e for e in ents if e.get("place") == 1), None)
@@ -367,11 +368,28 @@ def main():
                 e["course"] >= 2 and c1won, cat, e.get("st"), oth, e.get("status"), e.get("boat")))
             if e.get("name"):
                 names[e["regno"]] = e["name"]
+
             vc = venues_count.setdefault(e["regno"], {})
             vc[code] = vc.get(code, 0) + 1
             if code in VENUES and e.get("motor_no") is not None:
                 motors.setdefault(code, {}).setdefault(e["motor_no"], []).append(
                     (date, POINTS.get(e.get("place"), 0), e.get("place")))
+
+    # 級別・支部・年齢など: 5場の出走表(data/races)に載った一番新しい値
+    for p in sorted(glob.glob(os.path.join(DATA, "races", "*", "*.json"))):
+        try:
+            with open(p, encoding="utf-8") as f:
+                dd = json.load(f)
+        except Exception:
+            continue
+        ds = os.path.basename(p)[:8]
+        ds = f"{ds[:4]}-{ds[4:6]}-{ds[6:]}"
+        for code, v in (dd.get("venues") or {}).items():
+            for race in (v.get("races") or {}).values():
+                for e in race.get("entries") or []:
+                    if e.get("regno") and (e.get("class") or e.get("branch")):
+                        prof[e["regno"]] = {"date": ds, "class": e.get("class"), "branch": e.get("branch"), "age": e.get("age"),
+                                            "weight": e.get("weight"), "nat_win": e.get("nat_win"), "nat_2": e.get("nat_2")}
 
     # ---- 選手(直近1年)
     year_ago = last - dt.timedelta(days=365)
@@ -384,12 +402,15 @@ def main():
     def shrink(cnt, g):
         return [round((cnt[1 + i] + KIM_M * g[1 + i] / g[0]) / (cnt[0] + KIM_M), 4) for i in range(3)]
     fd = {k: {str(c): [0.0, 0] for c in range(7)} for k in ("f1", "f2")}
+    rindex = []   # 選手検索用: [登番, 名前, 級別, 支部, 年齢, 最後に走った日, 直近1年の出走数]
     for regno, recs in hist.items():
         recs1y = [r for r in recs if r[0] > year_ago]
         if not recs1y:
             continue  # 直近1年に走っていない選手は作らない
         rr = {"regno": regno, "name": names.get(regno, ""), "period": rperiod,
-              "last": recs[-1][0].isoformat(),
+              "last": recs[-1][0].isoformat(), "prof": prof.get(regno),
+              # 直近の出走(新しい順20走): [日付, 場, コース, 着, ST, 枠, 状態]
+              "recent": [[r[0].isoformat(), ALL_VENUES.get(r[1], r[1]), r[2], r[3], r[8], r[11], r[10]] for r in recs[-20:][::-1]],
               "venues": {ALL_VENUES.get(k, k): n for k, n in sorted(collections.Counter(r[1] for r in recs1y).items(), key=lambda x: -x[1])},
               "female": any(r[7] == "women" for r in recs1y),
               "sheet": {cat: sheet(rs) for cat in CATS
@@ -402,12 +423,17 @@ def main():
                       **{str(k): {"n": kc[regno][1][k][0], "rate": shrink(kc[regno][1][k], gk[k])} for k in range(2, 7)}}}
         with open(os.path.join(DATA, "stats", "racers", f"{regno}.json"), "w", encoding="utf-8") as f:
             json.dump(rr, f, ensure_ascii=False, separators=(",", ":"))
+        pf = rr["prof"] or {}
+        rindex.append([regno, rr["name"], pf.get("class"), pf.get("branch"), pf.get("age"), rr["last"], len(recs1y)])
         for c, d in rr["fst"]["st"].items():  # F持ちで平均STがどれだけ遅くなるか(選手ごとの差を本数で重み付け)
             if d.get("n", [0, 0])[1] >= 10:
                 for k in ("f1", "f2"):
                     if k in d:
                         fd[k][c][0] += (d[k][0] - d["n"][0]) * d[k][1]
                         fd[k][c][1] += d[k][1]
+    with open(os.path.join(DATA, "stats", "racer_index.json"), "w", encoding="utf-8") as f:
+        json.dump({"period": rperiod, "racers": sorted(rindex)}, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"選手検索 {len(rindex)}人")
     fdelta = {k: {c: round(x[0] / x[1], 4) if x[1] else None for c, x in v.items()} for k, v in fd.items()}
     with open(os.path.join(DATA, "stats", "fdelta.json"), "w", encoding="utf-8") as f:
         json.dump({"period": period, "delta": fdelta, "n": {k: {c: x[1] for c, x in v.items()} for k, v in fd.items()}}, f, ensure_ascii=False)
