@@ -1,8 +1,8 @@
 """各場のオリジナル展示(一周・まわり足・直線など)を取る。
 
 蒲郡: 公式サイトの「オリジナル展示」ページ。
-常滑・下関: 公式サイトの直前情報「オリジナル展示データ」タブ(modules/yosou、過去の日付も取れる。
-  常滑は2026年春ごろから、下関は2024年以前から残っている)。
+常滑・びわこ・下関: 公式サイトの直前情報「オリジナル展示データ」タブ(modules/yosou、過去の日付も取れる。
+  常滑は2026年春ごろから、びわこは2025年夏〜秋ごろから、下関は2024年以前から残っている)。
   直前情報と一緒に取る:  before.py から fetch(code, day, rno) を呼ぶ
   過去分のまとめ取り:    python scripts/orgtenji.py --start 20231110 --end 20261109 --workers 3
     保存先: data/org_past/YYYY/YYYYMMDD.json.gz  ({"07_01": {"1": {"lap":.., "turn":.., "straight":..}, ...}})
@@ -23,9 +23,12 @@ sys.path.insert(0, os.path.dirname(__file__))
 from collect import DATA  # noqa: E402
 
 GAMAGORI = "https://www.gamagori-kyotei.com/asp/gamagori/kyogi/kyogihtml/time/time{hd}07{rno:02d}.htm"
-CMS = {"08": "https://www.boatrace-tokoname.jp", "19": "https://www.boatrace-shimonoseki.jp"}
-CMS_URL = "{base}/modules/yosou/group-cyokuzen.php?day={hd}&race={rno}&kind=2&if=1"
-VENUES = {"07": "蒲郡", "08": "常滑", "19": "下関"}   # オリジナル展示が取れる場
+# 場: (サイト, 直前情報のページ, オリ展の表の目印)
+CMS = {"08": ("https://www.boatrace-tokoname.jp", "group-cyokuzen.php", "category-oriten"),
+       "11": ("https://www.boatrace-biwako.jp", "cyokuzen.php", "cyokuzen oriten"),
+       "19": ("https://www.boatrace-shimonoseki.jp", "group-cyokuzen.php", "category-oriten")}
+CMS_URL = "{base}/modules/yosou/{page}?day={hd}&race={rno}&kind=2&if=1"
+VENUES = {"07": "蒲郡", "08": "常滑", "11": "びわこ", "19": "下関"}   # オリジナル展示が取れる場
 LABELS = {"lap": "一周", "turn": "まわり足", "straight": "直線"}
 OUT = os.path.join(DATA, "org_past")
 
@@ -62,24 +65,24 @@ def parse_gamagori(html):
     return out
 
 
-def parse_cms(html):
-    """常滑・下関(同じ作りのサイト)の「オリジナル展示データ」表。"""
+def parse_cms(html, mark="category-oriten"):
+    """常滑・びわこ・下関(同じ会社のサイト)の「オリジナル展示データ」表。"""
     out = {}
-    if "category-oriten" not in html:
+    if mark not in html:
         return out
-    body = html.split("category-oriten", 1)[1]
+    body = html.split(mark, 1)[1]
     for tr in re.split(r"<tr[ >]", body):
-        m = re.search(r"class=[\'\"]col1 waku tei_color(\d)", tr)
+        m = re.search(r"class=[\'\"]col1 [^\'\"]*?(?:tei_color|imp-num)(\d)", tr)
         if not m:
             continue
         def col(n):
             c = re.search(r"class=[\'\"]col%d[^>]*>(.*?)</td>" % n, tr, re.S)
             return num(c.group(1)) if c else None
-        reg = re.search(r"/(\d{4})</li>|/(\d{4})<img", tr)
+        reg = re.search(r"/(\d{4})</li>|/(\d{4})<img|com-toban[\'\"]>(\d{4})<", tr)
         lap, turn, straight = col(6), col(7), col(8)
         if lap is None and turn is None and straight is None:
             continue
-        out[m.group(1)] = {"regno": (reg.group(1) or reg.group(2)) if reg else None, "exh": col(5),
+        out[m.group(1)] = {"regno": next(g for g in reg.groups() if g) if reg else None, "exh": col(5),
                            "lap": lap, "turn": turn, "straight": straight}
     return out
 
@@ -87,8 +90,9 @@ def parse_cms(html):
 def fetch(code, day, rno):
     """オリジナル展示を返す。取れない場・まだ出ていないときは None。"""
     if code in CMS:
-        html = get(CMS_URL.format(base=CMS[code], hd=f"{day:%Y%m%d}", rno=rno))
-        return (parse_cms(html) or None) if html else None
+        base, page, mark = CMS[code]
+        html = get(CMS_URL.format(base=base, page=page, hd=f"{day:%Y%m%d}", rno=rno))
+        return (parse_cms(html, mark) or None) if html else None
     if code != "07":
         return None
     html = get(GAMAGORI.format(hd=f"{day:%Y%m%d}", rno=rno))
