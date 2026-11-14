@@ -19,12 +19,15 @@ import orgtenji  # noqa: E402
 URL = "https://www.boatrace.jp/owpc/pc/race/beforeinfo?rno={rno}&jcd={jcd}&hd={hd}"
 # 締切の何分前から何分後まで取りに行くか(GitHub の定期実行は遅れることがあるので広めに)
 BEFORE_MIN, AFTER_MIN = 45, 20
-# オッズは締切20分前から締切まで、毎回取り直す
+# オッズは締切20分前から締切まで、毎回(5分ごと)取り直す
 ODDS_BEFORE_MIN = 20
+# 締切直前は細かく: 締切 NEAR_MIN 分前〜締切1分後のレースは NEAR_SEC 秒ごとに取り直して、展示後の予想(期待値の買い目)も作り直す
+NEAR_MIN, NEAR_SEC = 6, 30
 
 
-def fetch_live_odds(day, now):
-    """締切20分前〜締切のレースのオッズを取り、data/live/<日付>/<場>_<R>.json に保存する。"""
+def fetch_live_odds(day, now, before_min=ODDS_BEFORE_MIN, after_min=2):
+    """締切 before_min 分前〜締切 after_min 分後のレースのオッズを取り、data/live/<日付>/<場>_<R>.json に保存する。
+    戻り値: 取りに行った (場, R) のリスト"""
     from concurrent.futures import ThreadPoolExecutor
     from odds import get_race_full
     targets = []
@@ -34,10 +37,10 @@ def fetch_live_odds(day, now):
                 continue
             hh, mm = map(int, race["deadline"].split(":"))
             dl = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
-            if dl - dt.timedelta(minutes=ODDS_BEFORE_MIN) <= now <= dl + dt.timedelta(minutes=2):
+            if dl - dt.timedelta(minutes=before_min) <= now <= dl + dt.timedelta(minutes=after_min):
                 targets.append((code, int(no)))
     if not targets:
-        return 0
+        return []
     outdir = os.path.join(DATA, "live", f"{now:%Y%m%d}")
 
     def one(t):
@@ -48,7 +51,7 @@ def fetch_live_odds(day, now):
             return f"{VENUES[code]}{no}R オッズ失敗 {e}"
         if not o or not o["3t"]:
             return f"{VENUES[code]}{no}R オッズまだ"
-        o["time"] = dt.datetime.now(JST).strftime("%H:%M")
+        o["time"] = dt.datetime.now(JST).strftime("%H:%M:%S")
         os.makedirs(outdir, exist_ok=True)
         with open(os.path.join(outdir, f"{code}_{no:02d}.json"), "w", encoding="utf-8") as f:
             json.dump(o, f, separators=(",", ":"))
@@ -58,8 +61,8 @@ def fetch_live_odds(day, now):
         for msg in ex.map(one, targets):
             if msg:
                 print(msg)
-    print(f"{now:%H:%M} オッズ {len(targets)}レース")
-    return len(targets)
+    print(f"{now:%H:%M:%S} オッズ {len(targets)}レース")
+    return targets
 
 
 def text(s):
@@ -244,6 +247,31 @@ def results_only():
     return fetch_live_results(day, now)
 
 
+def run_pred(day_s, codes):
+    """振り返り用の予想(展示前・展示後)を data/pred に残す。展示後は締切まで作り直し、締切後は固定"""
+    try:
+        r = subprocess.run(["node", os.path.join(os.path.dirname(__file__), "pred.js"), day_s, *codes],
+                           capture_output=True, text=True, timeout=120)
+        print((r.stdout or "").strip() or (r.stderr or "").strip()[-300:])
+    except Exception as e:
+        print(f"予想の保存失敗 {e}")
+
+
+def near_odds():
+    """締切直前のレースだけ、オッズを取り直して展示後の予想を作り直す。取ったら True"""
+    now = dt.datetime.now(JST)
+    day_path = os.path.join(DATA, "races", f"{now:%Y}", f"{now:%Y%m%d}.json")
+    if not os.path.exists(day_path):
+        return False
+    with open(day_path, encoding="utf-8") as f:
+        day = json.load(f)
+    t = fetch_live_odds(day, now, NEAR_MIN, 1)
+    if not t:
+        return False
+    run_pred(f"{now:%Y%m%d}", sorted({c for c, _ in t}))
+    return True
+
+
 def fetch_once():
     """締切が近いレースの直前情報を取る。戻り値: (保存件数, 今日のまだ終わっていないレースがあるか)"""
     now = dt.datetime.now(JST)
@@ -291,12 +319,7 @@ def fetch_once():
             open(os.path.join(sdir, ".done"), "w").close()
     except Exception as e:
         print(f"節間平均の作成失敗 {e}")
-    try:  # 振り返り用の予想(5場): 展示前と展示後を data/pred に残す
-        r = subprocess.run(["node", os.path.join(os.path.dirname(__file__), "pred.js"), today.strftime("%Y%m%d"), "07", "08", "11", "12", "19"],
-                           capture_output=True, text=True, timeout=120)
-        print((r.stdout or "").strip() or (r.stderr or "").strip()[-300:])
-    except Exception as e:
-        print(f"予想の保存失敗 {e}")
+    run_pred(today.strftime("%Y%m%d"), ["07", "08", "11", "12", "19"])   # 振り返り用の予想(5場)
     return got, remaining
 
 
@@ -342,14 +365,24 @@ def main():
         if time.time() - start > limit * 60:
             print("時間になったので終了(次の実行に引き継ぎ)")
             break
-        # 次の5分ごとの取得までは、1分ごとに結果の速報だけを見る
-        while time.time() - t_cycle < 300 - 60:
-            time.sleep(60)
+        # 次の5分ごとの取得までは、NEAR_SEC 秒ごとに締切直前のオッズ(と展示後の予想)、1分ごとに結果の速報を見る
+        tick = 0
+        while time.time() - t_cycle < 300 - NEAR_SEC:
+            t_tick = time.time()
+            changed = False
             try:
-                if results_only():
-                    push()
+                changed |= near_odds()
             except Exception as e:
-                print(f"結果(速報)失敗 {e}")
+                print(f"直前オッズ失敗 {e}")
+            if tick % max(1, 60 // NEAR_SEC) == max(1, 60 // NEAR_SEC) - 1:
+                try:
+                    changed |= bool(results_only())
+                except Exception as e:
+                    print(f"結果(速報)失敗 {e}")
+            if changed:
+                push()
+            tick += 1
+            time.sleep(max(1, NEAR_SEC - (time.time() - t_tick)))
         time.sleep(max(5, 300 - (time.time() - t_cycle)))
 
 

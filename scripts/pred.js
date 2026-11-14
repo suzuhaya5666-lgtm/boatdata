@@ -142,7 +142,7 @@ for (const code of codes) {
   for (const race of Object.values(v.races).sort((a, b) => a.no - b.no)) {
     const no = String(race.no).padStart(2, "0");
     const slot = out.races[race.no] = out.races[race.no] || {};
-    const closed = date < today || (date === today && race.deadline && now > race.deadline);
+    const closed = date < today || (date === today && race.deadline && now >= race.deadline);  // 締切の時刻になったら固定(締切後のオッズは使わない)
     // 節間のまとめ(節間成績・節間平均の展示)。画面の withSeries と同じ
     const sm = J("data/model/series.json")?.[code], sr = J(`data/series/${day}/${code}.json`);
     const withS = (b) => (sr?.racers ? { ...(b || {}), series: sr, seriesModel: sm } : b);

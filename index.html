@@ -1282,7 +1282,7 @@ async function drawOddsTab(v, race, force) {
   // 状態の表示
   let status;
   if (od) {
-    status = od.time ? `<span class="otime">オッズ更新 ${esc(od.time)}（5分ごとに取り込み）</span>` : '<span class="otag">締切時オッズ</span>';
+    status = od.time ? `<span class="otime">オッズ更新 ${esc(od.time)}（5分ごと、締切6分前からは30秒ごとに取り込み）</span>` : '<span class="otag">締切時オッズ</span>';
   }
   let minsLeft = null;
   if (state.date === nowJST().date && race.deadline) {
