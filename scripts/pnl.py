@@ -22,6 +22,7 @@ STRATS = [
     ("pre_ex1", "展示前 2連単", "展示前の2連単本命1点"),
     ("bal", "バランス", "展示後のバランス(最大5点)"),
     ("ex", "2連単期待値", "展示後の2連単期待値1点"),
+    ("ex_sw", "2連単期待値 流し切替", "2連単期待値1点。3連単4点流しの合成オッズの方が高ければ3連単に切替(1レース1000円を払戻がそろうように配分)"),
     ("ana", "穴", "展示後の穴(最大5点)"),
     ("ana12", "穴12点", "穴12点・期待値が最大の形"),
     ("ana12_f5", "穴12点(5倍↑)", "穴12点・1番人気5倍以上のレースだけ"),
@@ -57,7 +58,19 @@ def keys(lst):
     return [z["k"] for z in (lst or []) if z and z.get("k")]
 
 
-def bets(pre, post, po):
+SW_YEN = 1000   # 流し切替の1レースの金額
+
+
+def split_amt(odds, total=SW_YEN):
+    """払戻がそろうように total 円を100円単位で配る(各100円以上)"""
+    inv = [1 / o for o in odds]
+    amt = [max(100, round(total * x / sum(inv) / 100) * 100) for x in inv]
+    while sum(amt) > total and max(amt) > 100:
+        amt[amt.index(max(amt))] -= 100
+    return amt
+
+
+def bets(pre, post, po, live=None):
     """買い方ごとの [投資, 払戻]。買わなかった買い方は入れない"""
     out = {}
 
@@ -87,6 +100,15 @@ def bets(pre, post, po):
         ex = keys(post.get("ex"))
         if ex:
             put("ex", [(k, 100) for k in ex])
+            # 流し切替: 決めた時点の 2連単オッズ と 3連単4点(k-x)の合成オッズ を比べる
+            k = ex[0]
+            e1 = next((z for z in post.get("ex1") or [] if z and z.get("k") == k), None)
+            o3 = (live or {}).get("3t") or {}
+            ks3 = [f"{k}-{x}" for x in range(1, 7) if str(x) not in k.split("-")]
+            if e1 and e1.get("syn") and e1.get("o") and e1["syn"] > e1["o"] and all(o3.get(z) for z in ks3):
+                put("ex_sw", list(zip(ks3, split_amt([o3[z] for z in ks3]))))
+            else:
+                put("ex_sw", [(k, SW_YEN)])
         tri("ana", keys(post.get("ana")))
         a = post.get("ana12")
         if a and a.get("best") in a:
@@ -122,7 +144,7 @@ def main():
                 if not po:
                     continue
                 x = pr["races"][r]
-                b = bets(x.get("pre"), x.get("post"), po)
+                b = bets(x.get("pre"), x.get("post"), po, load(os.path.join(DATA, "live", d, f"{code}_{int(r):02d}.json")))
                 if not b:
                     continue
                 t3 = po["3連単"][0]
