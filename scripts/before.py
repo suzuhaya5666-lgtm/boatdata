@@ -333,15 +333,30 @@ def push():
     run("git", "add", *paths)
     if run("git", "diff", "--cached", "--quiet").returncode == 0:
         return
+    # 結果(速報)が新しく入ったら、保存のあとで公開し直す(収支タブのカレンダーに当日分を出すため)
+    staged = run("git", "diff", "--cached", "--name-only").stdout.split()
+    new_res = any(p.startswith("data/live/") and p.endswith("_res.json") for p in staged)
     run("git", "commit", "-m", f"直前情報 {dt.datetime.now(JST):%Y-%m-%d %H:%M}")
     for _ in range(3):
         # 同じファイルを別の実行が書いていても止まらないよう、ぶつかったら手元(新しく取った方)を優先する
         if run("git", "pull", "--rebase", "-q", "-X", "theirs").returncode != 0:
             run("git", "rebase", "--abort")
         if run("git", "push", "-q").returncode == 0:
+            if new_res:
+                redeploy()
             return
         time.sleep(5)
     print("保存に失敗(次の回でまとめて保存します)")
+
+
+def redeploy():
+    """公開(pages)を動かす。失敗しても取得は続ける(夜の結果取得のあとにも公開し直される)。"""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo or not os.environ.get("GH_TOKEN"):
+        return
+    r = subprocess.run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/workflows/pages.yml/dispatches", "-f", "ref=main"],
+                       capture_output=True, text=True)
+    print("公開し直し: " + ("依頼しました" if r.returncode == 0 else f"失敗 {r.stderr.strip()[:200]}"))
 
 
 def main():

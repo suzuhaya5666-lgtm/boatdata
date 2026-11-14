@@ -23,6 +23,7 @@ on:
 
 permissions:
   contents: write
+  actions: write   # 結果が入ったら公開(pages)を動かす
 
 jobs:
   fetch:
@@ -35,6 +36,7 @@ jobs:
           python-version: "3.12"
       - name: 取得して保存
         env:
+          GH_TOKEN: ${{ github.token }}
           KIND: ${{ inputs.kind }}
           VENUE: ${{ inputs.venue }}
           RACE: ${{ inputs.race }}
