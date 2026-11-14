@@ -1,0 +1,42 @@
+name: amedas
+
+# 場の近くのアメダスの10分ごとの風(過去分のまとめ取り)。残りがあれば自分をもう一度動かす。
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        default: "20231110"
+      end:
+        default: "20261114"
+      chain:
+        default: "true"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: amedas
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - id: run
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python -u scripts/amedas.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes 320 | tee out.log
+          if grep -q "残り 0日" out.log; then echo "left=0" >> $GITHUB_OUTPUT; else echo "left=1" >> $GITHUB_OUTPUT; fi
+      - if: steps.run.outputs.left == '1' && inputs.chain == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/amedas.yml/dispatches \
+            -f ref=main -f "inputs[start]=${{ inputs.start }}" -f "inputs[end]=${{ inputs.end }}" -f "inputs[chain]=true"
