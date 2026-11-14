@@ -19,9 +19,14 @@ on:
         description: "最長で何分取るか"
         required: false
         default: "330"
+      chain:
+        description: "yes なら、残りがある限り自動で続きを実行する(過去分の一括取得用)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
+  actions: write
 
 concurrency:
   group: odds
@@ -42,4 +47,15 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python -u scripts/odds.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes "${{ inputs.minutes || '330' }}" --push-every 150
+          python -u scripts/odds.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes "${{ inputs.minutes || '330' }}" --push-every 150 | tee /tmp/odds.log
+
+      - name: 残りがあれば続きを実行
+        if: ${{ inputs.chain == 'yes' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          left=$(grep -o '残り [0-9]*件' /tmp/odds.log | tail -1 | grep -o '[0-9]*')
+          echo "残り ${left}件"
+          if [ "${left:-0}" -gt 0 ]; then
+            gh workflow run odds.yml --ref main -f start="${{ inputs.start }}" -f end="${{ inputs.end }}" -f minutes="${{ inputs.minutes }}" -f chain=yes
+          fi
