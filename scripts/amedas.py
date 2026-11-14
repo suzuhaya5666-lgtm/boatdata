@@ -24,6 +24,7 @@ STATIONS = {"07": ("蒲郡", "a", 51, "1344"), "08": ("セントレア", "a", 51
             "12": ("大阪", "s", 62, "47772"), "19": ("下関", "s", 81, "47762")}
 URL = "https://www.data.jma.go.jp/obd/stats/etrn/view/10min_{k}1.php?prec_no={p}&block_no={b}&year={y}&month={m}&day={d}&view="
 DIRS = ("北", "南", "東", "西", "静穏")
+DBG = [0]
 
 
 def parse(html):
@@ -58,8 +59,15 @@ def fetch(item):
     r = subprocess.run(["curl", "-sS", "-4", "--max-time", "40", "-A", "Mozilla/5.0",
                         URL.format(k=k, p=p, b=b, y=d.year, m=d.month, d=d.day)], capture_output=True)
     if r.returncode != 0:
+        if DBG[0] < 3:
+            DBG[0] += 1
+            print("取得失敗", code, d, r.returncode, r.stderr[:200], flush=True)
         return item, None
-    rows = parse(r.stdout.decode("utf-8", errors="replace"))
+    html = r.stdout.decode("utf-8", errors="replace")
+    rows = parse(html)
+    if not rows and DBG[0] < 3:
+        DBG[0] += 1
+        print("読み取れず", code, d, len(html), re.sub(r"\s+", " ", html[:300]), flush=True)
     return item, rows
 
 
