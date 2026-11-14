@@ -165,7 +165,10 @@ def main():
         if time.time() - t0 > a.max_minutes * 60:
             return item, False
         d, code, no, key = item
-        return item, fetch(code, d, no) or {}   # 取れなかったレースも空で記録(取り直さない)
+        o = fetch(code, d, no)
+        if not o and d >= (dt.datetime.utcnow() + dt.timedelta(hours=9)).date() - dt.timedelta(days=1):
+            return item, False   # 今日・昨日でまだ出ていない分は記録しない(あとで取り直す)
+        return item, o or {}   # 取れなかったレースも空で記録(取り直さない)
 
     pending, done = {}, 0
     with ThreadPoolExecutor(max_workers=a.workers) as ex:
