@@ -55,7 +55,7 @@ def path(code, d):
 def fetch(item):
     code, d = item
     _, k, p, b = STATIONS[code]
-    r = subprocess.run(["curl", "-sS", "-4", "--max-time", "40", "-A", "Mozilla/5.0 (personal data collection)",
+    r = subprocess.run(["curl", "-sS", "-4", "--max-time", "40", "-A", "Mozilla/5.0",
                         URL.format(k=k, p=p, b=b, y=d.year, m=d.month, d=d.day)], capture_output=True)
     if r.returncode != 0:
         return item, None
