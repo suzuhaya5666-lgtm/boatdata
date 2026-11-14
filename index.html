@@ -2093,6 +2093,11 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
       return Number.isNaN(v) ? null : st.startsWith("F") ? 0 : v;
     }
     if (f === "local") { const lb = model.local_branch?.[race?._v || state.venue]; return lb && e.branch ? (e.branch === lb ? 1 : 0) : null; }  // 地元の支部
+    if (f === "lady_mix") {  // 女子(男女混合): 男女混合レースの女子選手なら1、全員女子・全員男子のレースは0
+      if (!model.female || !e.regno) return null;
+      const fs = new Set(model.female), nf = Object.values(ents).filter((x) => x?.regno && fs.has(x.regno)).length;
+      return nf >= 1 && nf <= 5 && fs.has(e.regno) ? 1 : 0;
+    }
     if (f === "form" || f === "form_young") {  // 直近の調子(小さいほど好調)。若手版は蒲郡以外のデビュー5年以内だけ
       const x = bi?.series?.racers?.[e.regno]?.form;
       if (x == null) return null;
@@ -2144,6 +2149,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     if (f === "class") return e.class || null;
     if (f === "parts") return bi?.entries?.[b] ? (bi.entries[b].parts?.join("・") || "なし") : null;
     if (f === "local") { const x = val(f, b, k); return x == null ? null : x ? "地元" : "地元外"; }
+    if (f === "lady_mix") { const x = val(f, b, k); return x == null ? null : x ? "女子(混合)" : "-"; }
     if (f === "ex_st") return (bi?.start || []).find((x) => x.boat === b)?.st ?? null;
     return val(f, b, k);
   };
@@ -2365,6 +2371,21 @@ async function drawDemeTab(v, race, keepPos) {
   const lean = leanOf();
   const triBase = lean === "0" ? null : demeTri(q);  // 荒れアラートは補正なしで
   const triAll = demeTri(q, model, lean);
+  // 逃げ率を締切前のオッズと比べる。オッズ40%未満なのに予想が8pt以上高いときは、実際はオッズとほぼ同じだった(過去445レースで予想42%・オッズ29%・実際29%)
+  let nigeCard = "";
+  try {
+    const lv = await getLiveRaw(hd, state.venue, race.no), o3 = lv?.["3t"];
+    if (o3 && Object.keys(o3).length > 60) {
+      const b1 = order[1];
+      let all = 0, one = 0;
+      for (const [k, o] of Object.entries(o3)) { if (!o) continue; all += 1 / o; if (k.split("-")[0] === String(b1)) one += 1 / o; }
+      const pm = (triBase || triAll).filter((t) => t.c[0] === 1).reduce((a, t) => a + t.p, 0), po = one / all;
+      const warn = po < 0.40 && pm - po >= 0.08;
+      nigeCard = `<div class="card"><h2>逃げ率 予想とオッズ${warn ? " <span class='arebadge l2'>逃げ高く見すぎ注意</span>" : ""}</h2>
+        <div class="meta"><span>予想 <b>${(pm * 100).toFixed(1)}%</b></span><span>オッズ(${esc(lv.time || "")}) <b>${(po * 100).toFixed(1)}%</b></span><span>差 ${((pm - po) * 100 >= 0 ? "+" : "")}${((pm - po) * 100).toFixed(1)}pt</span></div>
+        <div class="note">オッズの逃げ率は、3連単オッズから出した${b1}号艇(1コース)の1着の確率。オッズが40%未満なのに予想が8pt以上高いレースは、過去445レースで実際の逃げが29%（予想42%・オッズ29%）と、オッズの方が当たっていた。予想の逃げ率は補正なしの値。</div></div>`;
+    }
+  } catch (e) { /* オッズなし */ }
   state.heads = state.heads || {};
   const head = state.heads[key] || 0;
   if (head) cut.delete(head);
@@ -2450,6 +2471,7 @@ async function drawDemeTab(v, race, keepPos) {
 
   $("view-race").innerHTML = `
     ${areCard({ "3連単": Object.fromEntries((triBase || triAll).map((t) => [t.c.join("-"), t.p])) }, state.venue, v.name, race, bi?.weather)}
+    ${nigeCard}
     <div class="card">
       <h2>進入</h2>
       <div class="slots">${slots}</div>

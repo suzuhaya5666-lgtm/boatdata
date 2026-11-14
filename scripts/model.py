@@ -30,13 +30,14 @@ WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
 FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu",
             "ex_st", "parts", "tilt", "motor_form", "local", "form", "form_young",
-            "slit_own", "slit_late", "slit_out", "slit_in"]
+            "slit_own", "slit_late", "slit_out", "slit_in", "lady_mix"]
 FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績",
                  "展示ST", "部品交換", "チルト", "モーターの調子", "地元", "直近の調子", "直近の調子(若手)",
-                 "予報スリット(自艇)", "予報スリット(自艇の遅れ)", "予報スリット(外隣)", "予報スリット(内隣)"]
+                 "予報スリット(自艇)", "予報スリット(自艇の遅れ)", "予報スリット(外隣)", "予報スリット(内隣)", "女子(男女混合)"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
-GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4], [5], [6], [7, 8, 9], [10, 14, 16, 17], [18, 19, 20, 21]]
-GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別", "平均ST", "F持ち", "オリジナル展示", "節間成績・調子",
+# 女子(男女混合): 男女混合レースの女子選手は、勝率などが同じ男子より勝ちにくい(全員女子のレースでは0)
+GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4, 22], [5], [6], [7, 8, 9], [10, 14, 16, 17], [18, 19, 20, 21]]
+GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別・女子", "平均ST", "F持ち", "オリジナル展示", "節間成績・調子",
                "予報スリット"]
 # 予報スリット: 各艇の想定ST(F持ちでないときのそのコースの平均ST。F持ちならF持ち中の実績5本以上はその平均、なければ+FDELTA)から、
 # 両隣の平均との差(＋は遅い)を自艇・自艇の遅れ側(0未満は0)・外隣・内隣の4つにする。検証で改善が小さいので、ふだんは使わない(画面で選べる)
@@ -141,7 +142,14 @@ def slit_feats(st):
     return out
 
 
+FEMALE = set()
+
+
 def build():
+    global FEMALE
+    from female import female_set
+    FEMALE = female_set()
+    print(f"女子選手 {len(FEMALE)}人", flush=True)
     races = sorted(((d, c, r, [e for e in r["entries"].values() if started(e)]) for d, c, r in load_races()),
                    key=lambda x: x[0])
     first = races[0][0]
@@ -215,7 +223,9 @@ def build():
                             CLS.get(b.get("class"), np.nan), adj, fc] + \
                         [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")] + \
                         [setsu_value(srec, code, e["regno"], day)] + before_feats(day, code, race["no"], e["boat"]) + [np.nan] + \
-                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0] + [np.nan, np.nan] + [np.nan] * 4
+                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0] + [np.nan, np.nan] + [np.nan] * 4 + [np.nan]
+                fem = [courses[k]["regno"] in FEMALE for k in range(1, 7)]
+                f[1:, 22] = np.array(fem, float) * (1.0 if 1 <= sum(fem) <= 5 else 0.0)
                 f[:, 18:22] = slit_feats([slit_st(courses[k]["regno"], k, fcnt[(courses[k]["regno"], f_period(day))], stN, stF, stNc, stFc)
                                           for k in range(1, 7)])
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
@@ -806,7 +816,7 @@ def main():
                    "W": np.round(W, 4).tolist(),
                    "features": FEATURES, "feature_names": FEATURE_NAMES, "sd": np.round(sd, 4).tolist(),
                    "groups": GROUPS, "group_names": GROUP_NAMES, "org_cm": org_cm,
-                   "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect", "motor_days": MOTOR_DAYS, "motor_k": MOTOR_K, "local_branch": LOCAL_BRANCH,
+                   "setsu_cm": SETSU_CM, "setsu_k": SETSU_K, "setsu_mode": "expect", "motor_days": MOTOR_DAYS, "motor_k": MOTOR_K, "local_branch": LOCAL_BRANCH, "female": sorted(FEMALE),
                    "form_days": FORM_DAYS, "form_days_default": FORM_DAYS_DEFAULT, "form_k": {str(k): v for k, v in FORM_K.items()}, "debut_ref": DEBUT_REF,
                    "setsu_base_mask": default_mask & ~(1 << GROUP_NAMES.index("節間成績・調子")),
                    "default_mask": default_mask, "slit_fdelta": FDELTA,
