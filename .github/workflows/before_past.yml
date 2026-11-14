@@ -11,6 +11,9 @@ on:
       end:
         description: "終了日 YYYYMMDD"
         default: "20261109"
+      codes:
+        description: "ほかの場(other=戸田・江戸川と5場以外の17場、空なら5場)"
+        default: ""
       chain:
         description: "残りがあれば続けて動かす"
         default: "true"
@@ -37,7 +40,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          python -u scripts/before_past.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --max-minutes 320 --workers 3 | tee out.log
+          python -u scripts/before_past.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --codes "${{ inputs.codes }}" --max-minutes 320 --workers 4 | tee out.log
           if grep -q "残り 0件" out.log; then echo "left=0" >> $GITHUB_OUTPUT; else echo "left=1" >> $GITHUB_OUTPUT; fi
       - name: 続きを動かす
         if: steps.run.outputs.left == '1' && inputs.chain == 'true'
@@ -45,4 +48,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api -X POST repos/${{ github.repository }}/actions/workflows/before_past.yml/dispatches \
-            -f ref=main -f "inputs[start]=${{ inputs.start }}" -f "inputs[end]=${{ inputs.end }}" -f "inputs[chain]=true"
+            -f ref=main -f "inputs[start]=${{ inputs.start }}" -f "inputs[end]=${{ inputs.end }}" -f "inputs[codes]=${{ inputs.codes }}" -f "inputs[chain]=true"

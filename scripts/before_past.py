@@ -4,6 +4,9 @@
 取得済みのレースは飛ばすので、何度動かしても続きから取る。
 
   python scripts/before_past.py --start 20231110 --end 20261109 --max-minutes 330 --workers 3
+
+ほかの場(チルトを跳ねた回数を数えるため): --codes 01,04,... を付けると、
+全24場の成績ファイル(data/raw/K/*.all.txt.gz)からレースを拾い、data/before_other/ に保存する。
 """
 import argparse
 import datetime as dt
@@ -22,6 +25,7 @@ from before import URL, parse  # noqa: E402
 from collect import DATA, VENUES  # noqa: E402
 
 OUT = os.path.join(DATA, "before_past")
+OTHER = ["01", "04", "05", "06", "09", "10", "13", "14", "15", "16", "17", "18", "20", "21", "22", "23", "24"]  # 戸田・江戸川と5場以外
 
 
 def day_file(d):
@@ -56,6 +60,27 @@ def push(msg):
             return
         time.sleep(5)
     print("保存に失敗(次の回でまとめて保存します)", flush=True)
+
+
+def targets_k(start, end, codes):
+    """成績ファイルに載っているレース(全24場)から、codes の場の分"""
+    import re
+    todo = []
+    for p in sorted(glob.glob(os.path.join(DATA, "raw", "K", "*", "k*.all.txt.gz"))):
+        d = dt.datetime.strptime("20" + os.path.basename(p)[1:7], "%Y%m%d").date()
+        if not (start <= d <= end):
+            continue
+        with gzip.open(p, "rt", encoding="utf-8") as f:
+            text = f.read()
+        have = load_day(d)
+        for code, body in re.findall(r"^(\d{2})KBGN\n(.*?)^\1KEND", text, re.S | re.M):
+            if code not in codes:
+                continue
+            for no in sorted({int(x) for x in re.findall(r"^\s+(\d{1,2})R\s+\S.*?H\d{4}m", body, re.M)}):
+                key = f"{code}_{no:02d}"
+                if key not in have:
+                    todo.append((d, code, no, key))
+    return todo
 
 
 def targets(start, end):
@@ -97,11 +122,16 @@ def main():
     ap.add_argument("--max-minutes", type=float, default=330)
     ap.add_argument("--workers", type=int, default=3)
     ap.add_argument("--push-every", type=int, default=300)
+    ap.add_argument("--codes", default="", help="ほかの場(カンマ区切り、other なら戸田・江戸川と5場以外の17場)")
     a = ap.parse_args()
+    global OUT
+    codes = OTHER if a.codes == "other" else [c for c in a.codes.split(",") if c]
+    if codes:
+        OUT = os.path.join(DATA, "before_other")
     t0 = time.time()
     start = dt.datetime.strptime(a.start, "%Y%m%d").date()
     end = dt.datetime.strptime(a.end, "%Y%m%d").date()
-    todo = targets(start, end)
+    todo = targets_k(start, end, codes) if codes else targets(start, end)
     print(f"取得するレース {len(todo)}件", flush=True)
     pending = {}  # 日付 -> {key: info}
     lock = threading.Lock()
