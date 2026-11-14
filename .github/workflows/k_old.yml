@@ -1,0 +1,52 @@
+name: k_old
+
+# 古い成績ファイル(全24場)のまとめ取り。分析用(data/raw_old)。残りがあれば自分をもう一度動かす。
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        default: "20200101"
+      end:
+        default: "20231109"
+      chain:
+        default: "true"
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: k_old
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 340
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          which 7z || sudo apt-get install -y p7zip-full
+          pip install --quiet numpy
+      - name: グレード(女子戦・SGの判定用)
+        run: python scripts/grades.py --since 202001 || true
+      - id: run
+        run: |
+          python -u scripts/k_old.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --workers 3 --max-minutes 300 | tee out.log
+          if grep -q "残り 0日" out.log; then echo "left=0" >> $GITHUB_OUTPUT; else echo "left=1" >> $GITHUB_OUTPUT; fi
+      - name: 保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/raw_old data/grades
+          git commit -q -m "古い成績ファイル $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')" || exit 0
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 10; done
+      - if: steps.run.outputs.left == '1' && inputs.chain == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/k_old.yml/dispatches \
+            -f ref=main -f "inputs[start]=${{ inputs.start }}" -f "inputs[end]=${{ inputs.end }}" -f "inputs[chain]=true"
