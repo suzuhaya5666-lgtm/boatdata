@@ -1,0 +1,32 @@
+name: tide
+
+# 潮位表(気象庁)を取る: 蒲郡=形原(G5)・常滑=鬼崎(ZD)・下関=長府(CF)。data/tide/<地点>/<年>.txt
+on:
+  workflow_dispatch:
+    inputs:
+      years:
+        description: "年(空白区切り)"
+        default: "2023 2024 2025 2026"
+
+permissions:
+  contents: write
+
+jobs:
+  tide:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          for st in G5 ZD CF; do
+            mkdir -p data/tide/$st
+            for y in ${{ inputs.years }}; do
+              curl -sSfL -4 --max-time 60 -A "Mozilla/5.0" "https://www.data.jma.go.jp/kaiyou/data/db/tide/suisan/txt/$y/$st.txt" -o data/tide/$st/$y.txt || echo "なし $st $y"
+              sleep 1
+            done
+          done
+          ls -la data/tide/*
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/tide
+          git commit -m "潮位表" || exit 0
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
