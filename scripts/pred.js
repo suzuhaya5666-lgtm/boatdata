@@ -109,9 +109,9 @@ const permsOf = (bs) => bs.length === 2 ? [[bs[0], bs[1]], [bs[1], bs[0]]]
 //  f2ex: 2連複 確率上位3つで期待値が一番高い目(1.3以上)
 //  f2x : 2連複 確率上位3つで期待値1.5以上(最大2点)。2連単2点の合成オッズの方が高ければ2連単に切替
 //  f3x : 3連複 確率上位5つで期待値1.5以上(全部、びわこ・住之江は買わない)。3連複 / 3連単ボックス6点 / 1着率が一番低い艇の頭を切った4点 を期待値で比べて一番高い形
-function f2of(adj, order, od, code) {
+function f2of(adj, order, od, code, lean = 1) {
   const of2 = od?.["2f"] || {}, of3 = od?.["3f"] || {}, o2 = od?.["2t"] || {}, o3 = od?.["3t"] || {};
-  const tri = demeTri(adj.q, model, 1).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
+  const tri = demeTri(adj.q, model, lean).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
   const P3 = {}, pf = {}, pf3 = {}, win = {};
   for (const t of tri) {
     P3[t.b.join("-")] = t.p; win[t.b[0]] = (win[t.b[0]] || 0) + t.p;
@@ -181,6 +181,8 @@ function predict(code, race, bi, od) {
     ex3: ex3(tri, exs, o3, o2),
     // 2連複(本命寄りの出目確率): 確率上位3つと、その中で期待値が一番高い目(1.3以上なら買い)
     ...f2of(adj, order, od, code),
+    // 同じ2連複1.5切替を中間の出目確率で(過去データで一番良かった形)
+    f2x_m: f2of(adj, order, od, code, 0.5).f2x,
   };
 }
 
