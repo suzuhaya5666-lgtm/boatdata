@@ -30,13 +30,14 @@ WARMUP_DAYS = 60  # 最初の2ヶ月はデータを貯めるだけ
 OUT = os.path.join(DATA, "model", "weights.json")
 FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu",
             "ex_st", "parts", "tilt", "motor_form", "local", "form", "form_young",
-            "slit_own", "slit_late", "slit_out", "slit_in", "lady_mix"]
+            "slit_own", "slit_late", "slit_out", "slit_in", "lady_mix", "local_slow"]
 FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績",
                  "展示ST", "部品交換", "チルト", "モーターの調子", "地元", "直近の調子", "直近の調子(若手)",
-                 "予報スリット(自艇)", "予報スリット(自艇の遅れ)", "予報スリット(外隣)", "予報スリット(内隣)", "女子(男女混合)"]
+                 "予報スリット(自艇)", "予報スリット(自艇の遅れ)", "予報スリット(外隣)", "予報スリット(内隣)", "女子(男女混合)", "地元の展示遅れ(びわこ)"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
 # 女子(男女混合): 男女混合レースの女子選手は、勝率などが同じ男子より勝ちにくい(全員女子のレースでは0)
-GROUPS = [[0, 11, 12, 13], [1], [2, 15], [3], [4, 22], [5], [6], [7, 8, 9], [10, 14, 16, 17], [18, 19, 20, 21]]
+# 地元の展示遅れ(びわこ): びわこの地元選手は、展示タイムがレース平均より遅くても減点を弱める(遅れた秒数、速い時は0)
+GROUPS = [[0, 11, 12, 13], [1], [2, 15, 23], [3], [4, 22], [5], [6], [7, 8, 9], [10, 14, 16, 17], [18, 19, 20, 21]]
 GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別・女子", "平均ST", "F持ち", "オリジナル展示", "節間成績・調子",
                "予報スリット"]
 # 予報スリット: 各艇の想定ST(F持ちでないときのそのコースの平均ST。F持ちならF持ち中の実績5本以上はその平均、なければ+FDELTA)から、
@@ -223,9 +224,14 @@ def build():
                             CLS.get(b.get("class"), np.nan), adj, fc] + \
                         [(org.get(str(e["boat"])) or {}).get(x) or np.nan for x in ("lap", "turn", "straight")] + \
                         [setsu_value(srec, code, e["regno"], day)] + before_feats(day, code, race["no"], e["boat"]) + [np.nan] + \
-                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0] + [np.nan, np.nan] + [np.nan] * 4 + [np.nan]
+                        [1.0 if (b.get("branch") or e.get("branch")) == LOCAL_BRANCH.get(code) else 0.0] + [np.nan, np.nan] + [np.nan] * 4 + [np.nan, np.nan]
                 fem = [courses[k]["regno"] in FEMALE for k in range(1, 7)]
                 f[1:, 22] = np.array(fem, float) * (1.0 if 1 <= sum(fem) <= 5 else 0.0)
+                if code == "11":
+                    ex = f[1:, 0]
+                    f[1:, 23] = np.where(f[1:, 15] == 1, np.clip(np.nan_to_num(ex - np.nanmean(ex)), 0, None), 0.0) if not np.isnan(ex).all() else np.nan
+                else:
+                    f[1:, 23] = 0.0
                 f[:, 18:22] = slit_feats([slit_st(courses[k]["regno"], k, fcnt[(courses[k]["regno"], f_period(day))], stN, stF, stNc, stFc)
                                           for k in range(1, 7)])
                 X.append(x); N.append(n); P.append(prior); Y.append([pl[1], pl[2], pl[3]]); F.append(f)
