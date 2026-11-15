@@ -33,8 +33,10 @@ CMS = {"08": ("https://www.boatrace-tokoname.jp", "group-cyokuzen.php", "categor
 TOKUYAMA = "https://www.boatrace-tokuyama.jp/modules/yosou/tenji.php?day={hd}&race={rno}&if=1"
 # 大村: スマホ版の出走表ページに 一周・まわり足・直線
 OMURA = "https://omurakyotei.jp/yosou/sp/syussou/?day={hd}&race={rno:02d}"
+# 丸亀: スマホ版の予想ページ(その日の分だけ。日付はページ内の raceDate で確かめる)
+MARUGAME = "https://www.marugameboat.jp/asp/kyogi/15/sp/yoso05{rno:02d}.htm"
 CMS_URL = "{base}/modules/yosou/{page}?day={hd}&race={rno}&kind=2&if=1"
-VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "13": "尼崎", "18": "徳山", "19": "下関", "24": "大村"}   # オリジナル展示が取れる場
+VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "13": "尼崎", "18": "徳山", "15": "丸亀", "19": "下関", "24": "大村"}   # オリジナル展示が取れる場
 LABELS = {"lap": "一周", "turn": "まわり足", "straight": "直線"}
 OUT = os.path.join(DATA, "org_past")
 
@@ -134,12 +136,32 @@ def parse_omura(html):
     return out
 
 
+def parse_marugame(html, hd):
+    """丸亀(スマホ版): オリジナル展示の表。枠 / 体重 / チルト / 展示 / 一周 / まわり足 / 直線"""
+    out = {}
+    if f"raceDate={hd}" not in html or 'id="yoso03_04"' not in html:
+        return out
+    body = html.split('id="yoso03_04"', 1)[1].split("</table>", 1)[0]
+    for tr in re.findall(r'<tr class="line_waku0(\d)">(.*?)</tr>', body, re.S):
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", tr[1], re.S)
+        if len(tds) < 7:
+            continue
+        lap, turn, straight = num(tds[4]), num(tds[5]), num(tds[6])
+        if lap is None and turn is None and straight is None:
+            continue
+        out[tr[0]] = {"regno": None, "exh": num(tds[3]), "lap": lap, "turn": turn, "straight": straight}
+    return out
+
+
 def fetch(code, day, rno):
     """オリジナル展示を返す。取れない場・まだ出ていないときは None。"""
     if code in CMS:
         base, page, mark = CMS[code]
         html = get(CMS_URL.format(base=base, page=page, hd=f"{day:%Y%m%d}", rno=rno))
         return (parse_cms(html, mark) or None) if html else None
+    if code == "15":
+        html = get(MARUGAME.format(rno=rno))
+        return (parse_marugame(html, f"{day:%Y%m%d}") or None) if html else None
     if code == "24":
         html = get(OMURA.format(hd=f"{day:%Y%m%d}", rno=rno))
         return (parse_omura(html) or None) if html else None
