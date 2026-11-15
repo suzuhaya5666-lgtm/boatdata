@@ -890,7 +890,7 @@ async function drawCardTab(v, race) {
   // 初日・2日目とF持ちの想定ST = ふだんのコース別平均 + F持ちの遅れ + 日程・条件・気象の遅れ(data/model/stdelay.json)
   const sd = await cached("data/model/stdelay.json").catch(() => null);
   const bi = await getBefore(state.date.replace(/-/g, ""), state.venue, race.no).catch(() => null);
-  const LOCALB = { "07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "19": "山口" };
+  const LOCALB = { "06": "静岡", "07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "13": "兵庫", "15": "香川", "18": "山口", "19": "山口", "24": "長崎" };
   const bin = (x, th) => th.filter((t) => x > t).length;
   const slotOf = (e) => {
     if (v.day === 1) {

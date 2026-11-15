@@ -319,7 +319,7 @@ def fetch_once():
             open(os.path.join(sdir, ".done"), "w").close()
     except Exception as e:
         print(f"節間平均の作成失敗 {e}")
-    run_pred(today.strftime("%Y%m%d"), ["07", "08", "11", "12", "19"])   # 振り返り用の予想(5場)
+    run_pred(today.strftime("%Y%m%d"), list(VENUES))   # 振り返り用の予想(全場)
     return got, remaining
 
 

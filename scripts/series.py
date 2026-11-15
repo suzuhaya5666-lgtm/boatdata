@@ -12,6 +12,8 @@ import os
 import sys
 
 DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from collect import VENUES  # noqa: E402
 
 
 def load(path):
@@ -47,7 +49,7 @@ def day_results(day, cm_all):
     if day not in _dayres:
         out = {}
         ex = None
-        for code in ("07", "08", "11", "12", "19"):
+        for code in VENUES:
             pv = races_of(day, code)
             if not pv or not cm_all.get(code):
                 continue
@@ -170,7 +172,7 @@ def build(day, code):
 
 def main():
     day = dt.datetime.strptime(sys.argv[1], "%Y%m%d").date()
-    for code in sys.argv[2:] or ["07", "08", "11", "12", "19"]:
+    for code in sys.argv[2:] or list(VENUES):
         out = build(day, code)
         if not out:
             print(f"節間平均 {code}: なし(1日目か開催なし)")

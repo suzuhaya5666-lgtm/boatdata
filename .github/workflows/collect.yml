@@ -17,6 +17,10 @@ on:
         description: "終了日 YYYYMMDD(空なら今日)"
         required: false
         default: ""
+      workers:
+        description: "同時に取るファイル数(まとめ取りは8くらい)"
+        required: false
+        default: "1"
       reparse:
         description: "保存済みの元データから解析だけやり直す"
         type: boolean
@@ -50,7 +54,7 @@ jobs:
 
       - name: データ収集
         run: |
-          python scripts/collect.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" ${{ inputs.reparse && '--reparse' || '' }}
+          python scripts/collect.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --workers "${{ inputs.workers || '1' }}" --max-minutes 90 ${{ inputs.reparse && '--reparse' || '' }}
 
       - name: 締切時オッズ(前日と今日の終わったレース)
         run: python -u scripts/odds.py --max-minutes 25

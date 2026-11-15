@@ -23,8 +23,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from collect import DATA  # noqa: E402
 import stats  # noqa: E402
 
-VENUES = ("07", "08", "11", "12", "19")
-LOCALB = {"07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "19": "山口"}
+from collect import VENUES  # noqa: E402
+from model import LOCAL_BRANCH as LOCALB  # noqa: E402
 PREVF = {1: [0.006, 0.003, 0], 2: [0.019, 0.013, 0.008]}
 EXLATE = [(0.40, 0.010)]
 HALF = 0.5  # 比較用の列: 遅れの補正(stdelay)をこの倍率にした想定

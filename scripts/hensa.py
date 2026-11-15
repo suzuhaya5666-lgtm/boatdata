@@ -23,8 +23,9 @@ KEYS = ["exh", "lap", "turn", "straight"]
 NAMES = ["展示タイム", "一周", "まわり足", "直線"]
 
 
-ORG_VENUES = ("07", "08", "11", "19")   # オリジナル展示がある場
-VNAME = {"07": "蒲郡", "08": "常滑", "11": "びわこ", "12": "住之江", "19": "下関"}
+from orgtenji import VENUES as _ORG  # noqa: E402
+ORG_VENUES = tuple(_ORG)   # オリジナル展示がある場
+from collect import VENUES as VNAME  # noqa: E402
 
 
 def venue(code):

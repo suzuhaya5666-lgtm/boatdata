@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 
 # 対象のレース場(場コード: 名前)
-VENUES = {"07": "蒲郡", "08": "常滑", "11": "びわこ", "12": "住之江", "19": "下関"}
+VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "12": "住之江", "13": "尼崎", "15": "丸亀", "18": "徳山", "19": "下関", "24": "大村"}
 
 BASE = "https://www1.mbrace.or.jp/od2"
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -97,6 +97,21 @@ def raw_all_path(d):
     return os.path.join(DATA, "raw", "K", f"{d:%Y}", f"k{d:%y%m%d}.all.txt.gz")
 
 
+def b_complete(d):
+    """保存済みの番組表に、その日に開催があった対象場が全部入っているか(場を足したときの取り直し用)"""
+    p = raw_path("B", d)
+    if not os.path.exists(p):
+        return False
+    pa = raw_all_path(d)
+    if not os.path.exists(pa):
+        return True
+    with gzip.open(pa, "rt", encoding="utf-8") as f:
+        held = set(re.findall(r"^(\d{2})KBGN", f.read(), re.M)) & set(VENUES)
+    with open(p, encoding="utf-8") as f:
+        have = set(re.findall(r"^(\d{2})BBGN", f.read(), re.M))
+    return held <= have
+
+
 def keep(secs, kind):
     kept = []
     for code, lines in secs.items():
@@ -116,7 +131,7 @@ def load_raw(kind, d, reparse):
             with gzip.open(pa, "rt", encoding="utf-8") as f:
                 return f.read(), False
     p = raw_path(kind, d)
-    if reparse or (kind == "B" and os.path.exists(p)):
+    if reparse or (kind == "B" and os.path.exists(p) and b_complete(d)):
         if os.path.exists(p):
             with open(p, encoding="utf-8") as f:
                 return f.read(), False
@@ -418,7 +433,7 @@ def main():
         d = start
         while d <= end:
             for kind in kinds:
-                saved = os.path.exists(raw_all_path(d)) if kind == "K" else os.path.exists(raw_path(kind, d))
+                saved = os.path.exists(raw_all_path(d)) if kind == "K" else b_complete(d)
                 if not saved:
                     todo.append((kind, d))
             d += dt.timedelta(days=1)

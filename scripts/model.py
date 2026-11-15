@@ -49,7 +49,12 @@ FDELTA = {1: 0.018, 2: 0.061}  # F持ちで平均STが遅くなる量(F持ち時
 SETSU_K = 6      # 節間成績: 走数が少ないときに0(平均)へ寄せる強さ。値 = 平均 × n/(n+6)
 SETSU_CM = {}    # 場×コースの平均着順(予想がないレースの節間成績に使う。画面にも渡す)
 ROWMETA = []     # 学習に使う各レース: (場, 日, R, {コース: 登番}, {コース: モーター番号})
-LOCAL_BRANCH = {"07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "19": "山口"}  # 地元の支部
+LOCAL_BRANCH = {"06": "静岡", "07": "愛知", "08": "愛知", "11": "滋賀", "12": "大阪", "13": "兵庫", "15": "香川", "18": "山口", "19": "山口", "24": "長崎"}
+try:
+    from orgtenji import VENUES as _ORG
+    ORG_CODES = tuple(_ORG)
+except Exception:
+    ORG_CODES = ("07", "08", "11", "19")  # 地元の支部
 MOTOR_DAYS, MOTOR_K = 90, 12
 FORM_DAYS = {"07": 180}        # 直近の調子: 5場の直近N日の(着順 − 予想の着順)の平均。蒲郡は180日、ほかは365日
 FORM_DAYS_DEFAULT = 365
@@ -418,7 +423,7 @@ _org_cache = {}
 def org_of(day, code, no):
     """オリジナル展示 {艇番: {lap, turn, straight}}。過去分(org_past)か、直前情報に保存した分。"""
     import gzip
-    if code not in ("07", "08", "11", "19"):   # オリジナル展示が取れる場(orgtenji.VENUES)
+    if code not in ORG_CODES:   # オリジナル展示が取れる場(orgtenji.VENUES)
         return {}
     if day not in _org_cache:
         p = os.path.join(DATA, "org_past", f"{day:%Y}", f"{day:%Y%m%d}.json.gz")
@@ -455,11 +460,13 @@ def before_feats(day, code, no, boat):
     """直前情報から [展示ST, 部品交換(0/1), チルト]。過去分(before_past)か、保存した直前情報。"""
     import gzip
     if day not in _bp_cache:
-        p = os.path.join(DATA, "before_past", f"{day:%Y}", f"{day:%Y%m%d}.json.gz")
         d = {}
-        if os.path.exists(p):
-            with gzip.open(p, "rt", encoding="utf-8") as f:
-                d = json.load(f)
+        # 5場は before_past、あとから足した場は before_other(チルト集計用に取った分)にある
+        for sub in ("before_other", "before_past"):
+            p = os.path.join(DATA, sub, f"{day:%Y}", f"{day:%Y%m%d}.json.gz")
+            if os.path.exists(p):
+                with gzip.open(p, "rt", encoding="utf-8") as f:
+                    d.update(json.load(f))
         _bp_cache[day] = d
     key = f"{code}_{int(no):02d}"
     b = _bp_cache[day].get(key)

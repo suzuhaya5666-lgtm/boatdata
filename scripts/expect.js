@@ -33,12 +33,15 @@ const zlib = require("zlib");
 let _bp;
 const bpast = () => {
   if (_bp === undefined) {
-    try { _bp = JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(ROOT, `data/before_past/${day.slice(0, 4)}/${day}.json.gz`))).toString()); } catch (e) { _bp = null; }
+    _bp = null;
+    for (const sub of ["before_other", "before_past"]) {   // あとから足した場は before_other
+      try { _bp = { ...(_bp || {}), ...JSON.parse(zlib.gunzipSync(fs.readFileSync(path.join(ROOT, `data/${sub}/${day.slice(0, 4)}/${day}.json.gz`))).toString()) }; } catch (e) { /* なし */ }
+    }
   }
   return _bp;
 };
 const out = {};
-for (const code of ["07", "08", "11", "12", "19"]) {
+for (const code of Object.keys(J("data/index.json")?.venues || { "07": 1, "08": 1, "11": 1, "12": 1, "19": 1 })) {
   const v = dayData.venues?.[code];
   if (!v || !vs.venues?.[code]) continue;
   for (const race of Object.values(v.races)) {
