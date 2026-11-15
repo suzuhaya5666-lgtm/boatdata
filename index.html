@@ -1115,6 +1115,7 @@ const BET_STRATS = [
   ["post_hon", "展示後 本命", "展示後の本命3点(3連単)"], ["pre_hon", "展示前 本命", "展示前の本命3点(3連単)"],
   ["post_ex1", "展示後 2連単", "展示後の2連単本命1点"], ["pre_ex1", "展示前 2連単", "展示前の2連単本命1点"],
   ["bal", "バランス", "展示後のバランス(最大5点)"], ["ex", "2連単期待値", "展示後の2連単期待値1点(期待値1.2以上)"],
+  ["f2ex", "2連複期待値", "2連複・本命寄りの確率上位3つで期待値が一番高い目(1.3以上の時だけ)"],
   ["ex_sw", "2連単期待値 流し切替", "3連単4点流しの合成オッズの方が高ければ3連単に切替(1レース1000円)"],
   ["ana", "穴", "展示後の穴(最大5点)"], ["ana12", "穴12点", "穴12点・期待値が最大の形"],
   ["ana12_f5", "穴12点(5倍↑)", "穴12点・1番人気5倍以上のレースだけ"],
@@ -1135,6 +1136,7 @@ function betsOf(pre, post, live) {
     tri("post_hon", post.hon);
     const e1 = (post.ex1 || [])[0]; if (e1) put("post_ex1", [[e1.k, 100, e1.o ?? null]]);
     tri("bal", post.bal);
+    const f2 = (post.f2ex || [])[0]; if (f2) put("f2ex", [[f2.k, 100, f2.o ?? null]]);
     const ex = (post.ex || [])[0];
     if (ex) {
       put("ex", [[ex.k, 100, ex.o ?? null]]);
@@ -1171,10 +1173,11 @@ async function drawBetTab(v, race, silent) {
     $("view-race").innerHTML = '<div class="empty">このレースの検証用の予想はまだありません。<br>朝の出走表のあと、展示前の予想が入ります。</div>';
   } else {
     const r3 = po?.["3連単"]?.[0]?.combo, r2 = po?.["2連単"]?.[0]?.combo;
-    const payOf = (k, amt) => { const t = k.split("-").length === 3 ? "3連単" : "2連単"; const e = (po?.[t] || []).find((x) => x.combo === k); return e ? Math.round(e.yen * amt / 100) : 0; };
+    const typOf = (k) => k.includes("=") ? (k.split("=").length === 2 ? "2連複" : "3連複") : (k.split("-").length === 3 ? "3連単" : "2連単");
+    const payOf = (k, amt) => { const t = typOf(k); const kk = k.replace(/=/g, "-"); const e = (po?.[t] || []).find((x) => x.combo === kk); return e ? Math.round(e.yen * amt / 100) : 0; };
     const bets = betsOf(slot.pre, slot.post, live);
     const bb = (b) => `<span class="mini k${b}">${b}</span>`;
-    const cmb = (k) => k.split("-").map(Number).map(bb).join("-");
+    const cmb = (k) => k.split(/[-=]/).map(Number).map(bb).join(k.includes("=") ? "=" : "-");
     const post = slot.post;
     const status = !post ? "展示前の予想だけです（展示が出ると展示後の買い目が入ります）"
       : closed ? `締切で確定（${esc(post.odds || post.time || "")} のオッズで決定）`
@@ -1184,7 +1187,7 @@ async function drawBetTab(v, race, silent) {
       if (!it) return `<tr><td class="name">${esc(name)}</td><td colspan="3" class="cnt">${(k.startsWith("pre") || post) ? "買わず" : "展示後に決まります"}</td></tr>`;
       const inv = it.reduce((a, x) => a + x[1], 0), ret = po ? it.reduce((a, x) => a + payOf(x[0], x[1]), 0) : null;
       return `<tr class="${ret > 0 ? "bhit" : ""}"><td class="name">${esc(name)}<br><small class="cnt">${inv.toLocaleString()}円</small></td>
-        <td>${it.map(([kk, amt, o]) => `<div class="${po && payOf(kk, amt) > 0 ? "plus" : ""}">${cmb(kk)} <small class="cnt">${kk.split("-").length === 3 ? "3単" : "2単"}${amt !== 100 ? " " + amt + "円" : ""}${o ? " " + o + "倍" : ""}</small></div>`).join("")}</td>
+        <td>${it.map(([kk, amt, o]) => `<div class="${po && payOf(kk, amt) > 0 ? "plus" : ""}">${cmb(kk)} <small class="cnt">${({ "3連単": "3単", "2連単": "2単", "2連複": "2複", "3連複": "3複" })[typOf(kk)]}${amt !== 100 ? " " + amt + "円" : ""}${o ? " " + o + "倍" : ""}</small></div>`).join("")}</td>
         <td class="y">${ret == null ? "-" : ret ? `<b class="plus">${ret.toLocaleString()}</b>` : "0"}</td></tr>`;
     }).join("");
     $("view-race").innerHTML = `

@@ -95,6 +95,17 @@ function ex3(tri, exs, o3, o2s) {
   return out;
 }
 
+function f2of(adj, order, od) {
+  const of2 = od?.["2f"] || {};
+  const tf = demeTri(adj.q, model, 1).map((t) => t.c.map((c) => order[c]));
+  const pf = {};
+  demeTri(adj.q, model, 1).forEach((t, i) => { const [x, y] = tf[i].slice(0, 2).sort((m, n) => m - n); const k = `${x}=${y}`; pf[k] = (pf[k] || 0) + t.p; });
+  const top = Object.entries(pf).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    .map(([k, p]) => ({ k, p: Math.round(p * 10000) / 10000, o: of2[k] || null, ev: of2[k] ? Math.round(p * of2[k] * 100) / 100 : null }));
+  const best = top.filter((z) => z.ev != null).sort((a, b) => b.ev - a.ev)[0];
+  return { f2: top, f2ex: Object.keys(of2).length >= 10 && best && best.ev >= 1.3 ? [best] : null };
+}
+
 function predict(code, race, bi, od) {
   const racers = Object.fromEntries(race.entries.map((e) => [e.boat, J(`data/stats/racers/${e.regno}.json`)]));
   const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
@@ -130,6 +141,8 @@ function predict(code, race, bi, od) {
     ana: hasOdds ? tri.filter((t) => (o3[t.k] || 0) >= 100 && t.p * o3[t.k] >= 1.5).sort((x, y) => y.p * o3[y.k] - x.p * o3[x.k]).slice(0, 5).map(one) : null,
     ana12: hasOdds ? ana12(tri, o3) : null,
     ex3: ex3(tri, exs, o3, o2),
+    // 2連複(本命寄りの出目確率): 確率上位3つと、その中で期待値が一番高い目(1.3以上なら買い)
+    ...f2of(adj, order, od),
   };
 }
 

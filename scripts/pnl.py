@@ -22,6 +22,7 @@ STRATS = [
     ("pre_ex1", "展示前 2連単", "展示前の2連単本命1点"),
     ("bal", "バランス", "展示後のバランス(最大5点)"),
     ("ex", "2連単期待値", "展示後の2連単期待値1点"),
+    ("f2ex", "2連複期待値", "展示後の2連複期待値1点(本命寄りの出目確率で、確率上位3つの中の期待値が一番高い目、1.3以上の時だけ)"),
     ("ex_sw", "2連単期待値 流し切替", "2連単期待値1点。3連単4点流しの合成オッズの方が高ければ3連単に切替(1レース1000円を払戻がそろうように配分)"),
     ("ana", "穴", "展示後の穴(最大5点)"),
     ("ana12", "穴12点", "穴12点・期待値が最大の形"),
@@ -51,6 +52,7 @@ def result(day, code, r, races_day):
 
 
 def pay(po, typ, k):
+    k = k.replace("=", "-")   # 連複は 1=2 で持っていて、払戻は 1-2
     return sum(e.get("yen") or 0 for e in po.get(typ, []) if e.get("combo") == k)
 
 
@@ -78,7 +80,7 @@ def bets(pre, post, po, live=None):
         """items: [(買い目, 金額)]。券種は買い目の長さで決まる"""
         rows = []
         for k, amt in items:
-            typ = "3連単" if len(k.split("-")) == 3 else "2連単"
+            typ = ("2連複" if len(k.split("=")) == 2 else "3連複") if "=" in k else ("3連単" if len(k.split("-")) == 3 else "2連単")
             rows.append([k, amt, pay(po, typ, k) * amt // 100])
         out[name] = [sum(r[1] for r in rows), sum(r[2] for r in rows), rows]
 
@@ -97,6 +99,9 @@ def bets(pre, post, po, live=None):
         if ex1:
             put("post_ex1", [(ex1[0], 100)])
         tri("bal", keys(post.get("bal")))
+        f2 = keys(post.get("f2ex"))
+        if f2:
+            put("f2ex", [(f2[0], 100)])
         ex = keys(post.get("ex"))
         if ex:
             put("ex", [(k, 100) for k in ex])
