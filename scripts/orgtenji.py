@@ -26,9 +26,13 @@ GAMAGORI = "https://www.gamagori-kyotei.com/asp/gamagori/kyogi/kyogihtml/time/ti
 # 場: (サイト, 直前情報のページ, オリ展の表の目印)
 CMS = {"08": ("https://www.boatrace-tokoname.jp", "group-cyokuzen.php", "category-oriten"),
        "11": ("https://www.boatrace-biwako.jp", "cyokuzen.php", "cyokuzen oriten"),
-       "19": ("https://www.boatrace-shimonoseki.jp", "group-cyokuzen.php", "category-oriten")}
+       "19": ("https://www.boatrace-shimonoseki.jp", "group-cyokuzen.php", "category-oriten"),
+       "06": ("https://www.boatrace-hamanako.jp", "group-cyokuzen.php", "category-oriten"),
+       "13": ("https://www.boatrace-amagasaki.jp", "group-cyokuzen.php", "category-oriten")}   # 尼崎は直線なし
+# 徳山: 展示情報のページ(tenji.php)に 一周・まわり足 がある
+TOKUYAMA = "https://www.boatrace-tokuyama.jp/modules/yosou/tenji.php?day={hd}&race={rno}&if=1"
 CMS_URL = "{base}/modules/yosou/{page}?day={hd}&race={rno}&kind=2&if=1"
-VENUES = {"07": "蒲郡", "08": "常滑", "11": "びわこ", "19": "下関"}   # オリジナル展示が取れる場
+VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "13": "尼崎", "18": "徳山", "19": "下関"}   # オリジナル展示が取れる場
 LABELS = {"lap": "一周", "turn": "まわり足", "straight": "直線"}
 OUT = os.path.join(DATA, "org_past")
 
@@ -87,12 +91,36 @@ def parse_cms(html, mark="category-oriten"):
     return out
 
 
+def parse_tokuyama(html):
+    """徳山の展示情報: col2 が枠(tei_colorN)、col10 展示タイム、col11 一周、col12 まわり足"""
+    out = {}
+    if "category-tenji" not in html:
+        return out
+    body = html.split("category-tenji", 1)[1]
+    for tr in re.split(r"<tr[ >]", body):
+        m = re.search(r"class=[\'\"]col2 tei_color(\d)", tr)
+        if not m:
+            continue
+        def col(n):
+            c = re.search(r"class=[\'\"]col%d[ \'\"][^>]*>(.*?)</td>" % n, tr, re.S)
+            return num(c.group(1)) if c else None
+        reg = re.search(r"com-toban[\'\"]>[A-Z]\d/(\d{4})<", tr)
+        lap, turn = col(11), col(12)
+        if lap is None and turn is None:
+            continue
+        out[m.group(1)] = {"regno": reg.group(1) if reg else None, "exh": col(10), "lap": lap, "turn": turn, "straight": None}
+    return out
+
+
 def fetch(code, day, rno):
     """オリジナル展示を返す。取れない場・まだ出ていないときは None。"""
     if code in CMS:
         base, page, mark = CMS[code]
         html = get(CMS_URL.format(base=base, page=page, hd=f"{day:%Y%m%d}", rno=rno))
         return (parse_cms(html, mark) or None) if html else None
+    if code == "18":
+        html = get(TOKUYAMA.format(hd=f"{day:%Y%m%d}", rno=rno))
+        return (parse_tokuyama(html) or None) if html else None
     if code != "07":
         return None
     html = get(GAMAGORI.format(hd=f"{day:%Y%m%d}", rno=rno))
