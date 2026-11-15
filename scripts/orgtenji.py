@@ -31,8 +31,10 @@ CMS = {"08": ("https://www.boatrace-tokoname.jp", "group-cyokuzen.php", "categor
        "13": ("https://www.boatrace-amagasaki.jp", "group-cyokuzen.php", "category-oriten")}   # 尼崎は直線なし
 # 徳山: 展示情報のページ(tenji.php)に 一周・まわり足 がある
 TOKUYAMA = "https://www.boatrace-tokuyama.jp/modules/yosou/tenji.php?day={hd}&race={rno}&if=1"
+# 大村: スマホ版の出走表ページに 一周・まわり足・直線
+OMURA = "https://omurakyotei.jp/yosou/sp/syussou/?day={hd}&race={rno:02d}"
 CMS_URL = "{base}/modules/yosou/{page}?day={hd}&race={rno}&kind=2&if=1"
-VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "13": "尼崎", "18": "徳山", "19": "下関"}   # オリジナル展示が取れる場
+VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "13": "尼崎", "18": "徳山", "19": "下関", "24": "大村"}   # オリジナル展示が取れる場
 LABELS = {"lap": "一周", "turn": "まわり足", "straight": "直線"}
 OUT = os.path.join(DATA, "org_past")
 
@@ -112,12 +114,35 @@ def parse_tokuyama(html):
     return out
 
 
+def parse_omura(html):
+    """大村(スマホ版): 枠 / ST / 展示タイム / 一周 / まわり足 / 直線 の順の表"""
+    out = {}
+    i = html.find(">一周<")
+    if i < 0:
+        return out
+    for tr in re.split(r"<tr[ >]", html[i:])[1:7]:
+        m = re.search(r'<td class="waku(\d)[^"]*">\d</td>', tr)
+        if not m:
+            continue
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", tr, re.S)
+        if len(tds) < 6:
+            continue
+        lap, turn, straight = num(tds[3]), num(tds[4]), num(tds[5])
+        if lap is None and turn is None and straight is None:
+            continue
+        out[m.group(1)] = {"regno": None, "exh": num(tds[2]), "lap": lap, "turn": turn, "straight": straight}
+    return out
+
+
 def fetch(code, day, rno):
     """オリジナル展示を返す。取れない場・まだ出ていないときは None。"""
     if code in CMS:
         base, page, mark = CMS[code]
         html = get(CMS_URL.format(base=base, page=page, hd=f"{day:%Y%m%d}", rno=rno))
         return (parse_cms(html, mark) or None) if html else None
+    if code == "24":
+        html = get(OMURA.format(hd=f"{day:%Y%m%d}", rno=rno))
+        return (parse_omura(html) or None) if html else None
     if code == "18":
         html = get(TOKUYAMA.format(hd=f"{day:%Y%m%d}", rno=rno))
         return (parse_tokuyama(html) or None) if html else None
