@@ -95,15 +95,53 @@ function ex3(tri, exs, o3, o2s) {
   return out;
 }
 
-function f2of(adj, order, od) {
-  const of2 = od?.["2f"] || {};
-  const tf = demeTri(adj.q, model, 1).map((t) => t.c.map((c) => order[c]));
-  const pf = {};
-  demeTri(adj.q, model, 1).forEach((t, i) => { const [x, y] = tf[i].slice(0, 2).sort((m, n) => m - n); const k = `${x}=${y}`; pf[k] = (pf[k] || 0) + t.p; });
-  const top = Object.entries(pf).sort((a, b) => b[1] - a[1]).slice(0, 3)
-    .map(([k, p]) => ({ k, p: Math.round(p * 10000) / 10000, o: of2[k] || null, ev: of2[k] ? Math.round(p * of2[k] * 100) / 100 : null }));
+const PER = 1000;   // 連複系(切替あり)の1点あたりの金額
+function splitAmt(odds, total = PER) {
+  const inv = odds.map((o) => 1 / o), sm = inv.reduce((a, b) => a + b, 0);
+  const amt = inv.map((x) => Math.max(100, Math.round(total * x / sm / 100) * 100));
+  while (amt.reduce((a, b) => a + b, 0) > total && Math.max(...amt) > 100) amt[amt.indexOf(Math.max(...amt))] -= 100;
+  return amt;
+}
+const permsOf = (bs) => bs.length === 2 ? [[bs[0], bs[1]], [bs[1], bs[0]]]
+  : bs.flatMap((a) => bs.filter((b) => b !== a).map((b) => [a, b, bs.find((c) => c !== a && c !== b)]));
+
+// 連複系(本命寄りの出目確率)
+//  f2ex: 2連複 確率上位3つで期待値が一番高い目(1.3以上)
+//  f2x : 2連複 確率上位3つで期待値1.5以上(最大2点)。2連単2点の合成オッズの方が高ければ2連単に切替
+//  f3x : 3連複 確率上位5つで期待値1.5以上(全部、びわこ・住之江は買わない)。3連複 / 3連単ボックス6点 / 1着率が一番低い艇の頭を切った4点 を期待値で比べて一番高い形
+function f2of(adj, order, od, code) {
+  const of2 = od?.["2f"] || {}, of3 = od?.["3f"] || {}, o2 = od?.["2t"] || {}, o3 = od?.["3t"] || {};
+  const tri = demeTri(adj.q, model, 1).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
+  const P3 = {}, pf = {}, pf3 = {}, win = {};
+  for (const t of tri) {
+    P3[t.b.join("-")] = t.p; win[t.b[0]] = (win[t.b[0]] || 0) + t.p;
+    const k2 = t.b.slice(0, 2).sort((m, n) => m - n).join("="); pf[k2] = (pf[k2] || 0) + t.p;
+    const k3 = [...t.b].sort((m, n) => m - n).join("="); pf3[k3] = (pf3[k3] || 0) + t.p;
+  }
+  const r4 = (x) => Math.round(x * 10000) / 10000, r2 = (x) => Math.round(x * 100) / 100;
+  const tops = (pp, oo, n) => Object.entries(pp).sort((a, b) => b[1] - a[1]).slice(0, n)
+    .map(([k, p]) => ({ k, p: r4(p), o: oo[k] || null, ev: oo[k] ? r2(p * oo[k]) : null }));
+  const top = tops(pf, of2, 3);
   const best = top.filter((z) => z.ev != null).sort((a, b) => b.ev - a.ev)[0];
-  return { f2: top, f2ex: Object.keys(of2).length >= 10 && best && best.ev >= 1.3 ? [best] : null };
+  const ok2 = Object.keys(of2).length >= 10, ok3 = Object.keys(of3).length >= 15 && Object.keys(o3).length > 60;
+  const syn = (ks, oo) => ks.every((k) => oo[k] > 0) ? 1 / ks.reduce((a, k) => a + 1 / oo[k], 0) : null;
+  const f2x = !ok2 ? null : top.filter((z) => z.ev != null && z.ev >= 1.5).sort((a, b) => b.ev - a.ev).slice(0, 2).map((z) => {
+    const ks = permsOf(z.k.split("=").map(Number)).map((x) => x.join("-")), s = syn(ks, o2);
+    if (s && s > z.o) { const a = splitAmt(ks.map((k) => o2[k])); return { ...z, syn: r2(s), buy: ks.map((k, i) => [k, a[i], o2[k]]) }; }
+    return { ...z, syn: s ? r2(s) : null, buy: [[z.k, PER, z.o]] };
+  });
+  const f3x = !ok3 || ["11", "12"].includes(code) ? null : tops(pf3, of3, 5).filter((z) => z.ev != null && z.ev >= 1.5).map((z) => {
+    const bs = z.k.split("=").map(Number), lo = bs.reduce((m, b) => ((win[b] || 0) < (win[m] || 0) ? b : m), bs[0]);
+    const k6 = permsOf(bs).map((x) => x.join("-")), k4 = k6.filter((k) => Number(k[0]) !== lo);
+    const c = [{ ev: z.ev, buy: [[z.k, PER, z.o]], f: "3連複" }];
+    const s6 = syn(k6, o3), s4 = syn(k4, o3);
+    if (s6) c.push({ ev: k6.reduce((a, k) => a + (P3[k] || 0), 0) * s6, ks: k6, f: "ボックス" });
+    if (s4) c.push({ ev: k4.reduce((a, k) => a + (P3[k] || 0), 0) * s4, ks: k4, f: `${lo}頭切り` });
+    const w = c.sort((a, b) => b.ev - a.ev)[0];
+    if (w.ks) { const a = splitAmt(w.ks.map((k) => o3[k])); w.buy = w.ks.map((k, i) => [k, a[i], o3[k]]); }
+    return { ...z, form: w.f, buy: w.buy };
+  });
+  return { f2: top, f2ex: ok2 && best && best.ev >= 1.3 ? [best] : null, f2x: f2x?.length ? f2x : null, f3x: f3x?.length ? f3x : null };
 }
 
 function predict(code, race, bi, od) {
@@ -142,7 +180,7 @@ function predict(code, race, bi, od) {
     ana12: hasOdds ? ana12(tri, o3) : null,
     ex3: ex3(tri, exs, o3, o2),
     // 2連複(本命寄りの出目確率): 確率上位3つと、その中で期待値が一番高い目(1.3以上なら買い)
-    ...f2of(adj, order, od),
+    ...f2of(adj, order, od, code),
   };
 }
 
