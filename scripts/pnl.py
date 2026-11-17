@@ -32,6 +32,8 @@ STRATS = [
     ("ana12_f5", "穴12点(5倍↑)", "穴12点・1番人気5倍以上のレースだけ"),
     ("ex3_10sw", "1位固定 10%切替", "2連単1位固定・10%削り・2連単の方が高ければ2連単に切替"),
     ("ex3_20", "1位固定 20%", "2連単1位固定・20%削り(3連単だけ)"),
+    ("ex3_10sw_ev", "1位固定 10%切替 期待値1.3", "1位固定10%切替を、買う形の期待値が1.3以上の時だけ"),
+    ("ex3_20_ev", "1位固定 20% 期待値1.3", "1位固定20%を、買う目の期待値(確率の合計×合成オッズ)が1.3以上の時だけ"),
 ]
 
 
@@ -137,6 +139,18 @@ def bets(pre, post, po, live=None):
                 else:
                     tri("ex3_10sw", c10)
             tri("ex3_20", keys(e.get("cut20")))
+            # 期待値つき: 2連単なら 確率×オッズ、3連単なら 確率の合計×合成オッズ
+            psum = lambda n: sum(z.get("p") or 0 for z in e.get(n) or [])
+            if c10 and e.get("o2") and e.get("cut10_syn"):
+                sw = e["o2"] > e["cut10_syn"]
+                ev = (e.get("p") or 0) * e["o2"] if sw else psum("cut10") * e["cut10_syn"]
+                if ev >= 1.3:
+                    if sw:
+                        put("ex3_10sw_ev", [(e["k"], 100 * len(c10))])
+                    else:
+                        tri("ex3_10sw_ev", c10)
+            if e.get("cut20_syn") and psum("cut20") * e["cut20_syn"] >= 1.3:
+                tri("ex3_20_ev", keys(e.get("cut20")))
     return out
 
 

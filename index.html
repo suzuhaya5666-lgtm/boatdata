@@ -1122,7 +1122,8 @@ const BET_STRATS = [
   ["ex_sw", "2連単期待値 流し切替", "3連単4点流しの合成オッズの方が高ければ3連単に切替(1レース1000円)"],
   ["ana", "穴", "展示後の穴(最大5点)"], ["ana12", "穴12点", "穴12点・期待値が最大の形"],
   ["ana12_f5", "穴12点(5倍↑)", "穴12点・1番人気5倍以上のレースだけ"],
-  ["ex3_10sw", "1位固定 10%切替", "2連単1位固定・10%削り・2連単の方が高ければ2連単に切替"], ["ex3_20", "1位固定 20%", "2連単1位固定・20%削り(3連単だけ)"]];
+  ["ex3_10sw", "1位固定 10%切替", "2連単1位固定・10%削り・2連単の方が高ければ2連単に切替"], ["ex3_20", "1位固定 20%", "2連単1位固定・20%削り(3連単だけ)"],
+  ["ex3_10sw_ev", "1位固定 10%切替 期待値1.3", "1位固定10%切替を、買う形の期待値が1.3以上の時だけ"], ["ex3_20_ev", "1位固定 20% 期待値1.3", "1位固定20%を、買う目の期待値(確率の合計×合成オッズ)が1.3以上の時だけ"]];
 function betSplit(odds, total = 1000) {
   const inv = odds.map((o) => 1 / o), sm = inv.reduce((a, b) => a + b, 0);
   const amt = inv.map((x) => Math.max(100, Math.round(total * x / sm / 100) * 100));
@@ -1156,6 +1157,12 @@ function betsOf(pre, post, live) {
       const c10 = ks(e.cut10);
       if (c10.length && e.o2 && e.cut10_syn) out.ex3_10sw = e.o2 > e.cut10_syn ? [[e.k, 100 * c10.length, e.o2]] : (e.cut10 || []).map((z) => [z.k, 100, z.o ?? null]);
       tri("ex3_20", e.cut20);
+      const ps = (n) => (e[n] || []).reduce((a, z) => a + (z.p || 0), 0);
+      if (c10.length && e.o2 && e.cut10_syn) {
+        const sw = e.o2 > e.cut10_syn, ev = sw ? (e.p || 0) * e.o2 : ps("cut10") * e.cut10_syn;
+        if (ev >= 1.3) out.ex3_10sw_ev = out.ex3_10sw;
+      }
+      if (e.cut20_syn && ps("cut20") * e.cut20_syn >= 1.3) out.ex3_20_ev = out.ex3_20;
     }
   }
   return out;
