@@ -35,8 +35,10 @@ TOKUYAMA = "https://www.boatrace-tokuyama.jp/modules/yosou/tenji.php?day={hd}&ra
 OMURA = "https://omurakyotei.jp/yosou/sp/syussou/?day={hd}&race={rno:02d}"
 # 丸亀: スマホ版の予想ページ(その日の分だけ。日付はページ内の raceDate で確かめる)
 MARUGAME = "https://www.marugameboat.jp/asp/kyogi/15/sp/yoso05{rno:02d}.htm"
+# 住之江も丸亀と同じ作り(スマホ版の直前情報・予想ページの「オリジナル展示」タブ、その日の分だけ)
+SUMINOE = "https://www.boatrace-suminoe.jp/asp/kyogi/12/sp/yoso05{rno:02d}.htm"
 CMS_URL = "{base}/modules/yosou/{page}?day={hd}&race={rno}&kind=2&if=1"
-VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "13": "尼崎", "18": "徳山", "15": "丸亀", "19": "下関", "24": "大村"}   # オリジナル展示が取れる場
+VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "12": "住之江", "13": "尼崎", "18": "徳山", "15": "丸亀", "19": "下関", "24": "大村"}   # オリジナル展示が取れる場
 LABELS = {"lap": "一周", "turn": "まわり足", "straight": "直線"}
 OUT = os.path.join(DATA, "org_past")
 
@@ -144,9 +146,9 @@ def parse_marugame(html, hd):
     body = html.split('id="yoso03_04"', 1)[1].split("</table>", 1)[0]
     for tr in re.findall(r'<tr class="line_waku0(\d)">(.*?)</tr>', body, re.S):
         tds = re.findall(r"<td[^>]*>(.*?)</td>", tr[1], re.S)
-        if len(tds) < 7:
+        if len(tds) < 6:
             continue
-        lap, turn, straight = num(tds[4]), num(tds[5]), num(tds[6])
+        lap, turn, straight = num(tds[4]), num(tds[5]), (num(tds[6]) if len(tds) > 6 else None)
         if lap is None and turn is None and straight is None:
             continue
         out[tr[0]] = {"regno": None, "exh": num(tds[3]), "lap": lap, "turn": turn, "straight": straight}
@@ -159,8 +161,8 @@ def fetch(code, day, rno):
         base, page, mark = CMS[code]
         html = get(CMS_URL.format(base=base, page=page, hd=f"{day:%Y%m%d}", rno=rno))
         return (parse_cms(html, mark) or None) if html else None
-    if code == "15":
-        html = get(MARUGAME.format(rno=rno))
+    if code in ("12", "15"):
+        html = get((SUMINOE if code == "12" else MARUGAME).format(rno=rno))
         return (parse_marugame(html, f"{day:%Y%m%d}") or None) if html else None
     if code == "24":
         html = get(OMURA.format(hd=f"{day:%Y%m%d}", rno=rno))
