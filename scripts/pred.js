@@ -95,6 +95,34 @@ function ex3(tri, exs, o3, o2s) {
   return out;
 }
 
+// 予想とオッズを混ぜた確率(過去データで一番当たった比率: 予想0.18・オッズ0.90)で期待値を出す
+//  bl2 : 2連単 確率上位3つで期待値が一番高い目(1.1以上)の1点
+//  bl10: 1位固定10%切替(2連単1位を固定、3連単の下10%を削り、2連単の方が高ければ2連単)。買う形の期待値1.1以上
+const BL_A = 0.18, BL_B = 0.90, BL_EV = 1.1;
+function blendBets(tri, o3, o2) {
+  if (Object.keys(o3).length < 100) return null;
+  const io = tri.map((t) => (o3[t.k] > 0 ? 1 / o3[t.k] : 0)), si = io.reduce((a, b) => a + b, 0);
+  const lp = tri.map((t, i) => BL_A * Math.log(t.p + 1e-6) + BL_B * Math.log(io[i] / si + 1e-6));
+  const mx = Math.max(...lp), ex = lp.map((x) => Math.exp(x - mx)), se = ex.reduce((a, b) => a + b, 0);
+  const pb = {}; tri.forEach((t, i) => { pb[t.k] = ex[i] / se; });
+  const p2 = {}; for (const [k, p] of Object.entries(pb)) { const k2 = k.split("-").slice(0, 2).join("-"); p2[k2] = (p2[k2] || 0) + p; }
+  const ord2 = Object.entries(p2).sort((a, b) => b[1] - a[1]);
+  const r2 = (x) => Math.round(x * 100) / 100;
+  const out = {};
+  const c2 = ord2.slice(0, 3).filter(([k, p]) => o2[k] > 0 && p * o2[k] >= BL_EV).sort((a, b) => b[1] * o2[b[0]] - a[1] * o2[a[0]]);
+  if (c2.length) { const [k, p] = c2[0]; out.bl2 = { ev: r2(p * o2[k]), buy: [[k, 100, o2[k]]] }; }
+  const [top, pt] = ord2[0];
+  const c = Object.keys(pb).filter((k) => k.startsWith(top + "-")).sort((a, b) => pb[b] - pb[a]);
+  let cut = 0;
+  while (c.length > 1 && cut + pb[c[c.length - 1]] / pt <= 0.1 + 1e-12) { cut += pb[c[c.length - 1]] / pt; c.pop(); }
+  if (c.every((k) => o3[k] > 0)) {
+    const syn = 1 / c.reduce((a, k) => a + 1 / o3[k], 0);
+    if (o2[top] > syn) { if (pt * o2[top] >= BL_EV) out.bl10 = { ev: r2(pt * o2[top]), buy: [[top, 100 * c.length, o2[top]]] }; }
+    else { const ps = c.reduce((a, k) => a + pb[k], 0); if (ps * syn >= BL_EV) out.bl10 = { ev: r2(ps * syn), buy: c.map((k) => [k, 100, o3[k]]) }; }
+  }
+  return out;
+}
+
 const PER = 1000;   // 連複系(切替あり)の1点あたりの金額
 function splitAmt(odds, total = PER) {
   const inv = odds.map((o) => 1 / o), sm = inv.reduce((a, b) => a + b, 0);
@@ -179,6 +207,7 @@ function predict(code, race, bi, od) {
     ana: hasOdds ? tri.filter((t) => (o3[t.k] || 0) >= 100 && t.p * o3[t.k] >= 1.5).sort((x, y) => y.p * o3[y.k] - x.p * o3[x.k]).slice(0, 5).map(one) : null,
     ana12: hasOdds ? ana12(tri, o3) : null,
     ex3: ex3(tri, exs, o3, o2),
+    ...(blendBets(tri, o3, o2) || {}),
     // 2連複(本命寄りの出目確率): 確率上位3つと、その中で期待値が一番高い目(1.3以上なら買い)
     ...f2of(adj, order, od, code),
     // 同じ2連複1.5切替を中間の出目確率で(過去データで一番良かった形)

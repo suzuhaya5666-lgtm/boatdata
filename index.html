@@ -1123,6 +1123,8 @@ const BET_STRATS = [
   ["ana", "穴", "展示後の穴(最大5点)"], ["ana12", "穴12点", "穴12点・期待値が最大の形"],
   ["ana12_f5", "穴12点(5倍↑)", "穴12点・1番人気5倍以上のレースだけ"],
   ["ex3_10sw", "1位固定 10%切替", "2連単1位固定・10%削り・2連単の方が高ければ2連単に切替"], ["ex3_20", "1位固定 20%", "2連単1位固定・20%削り(3連単だけ)"],
+  ["bl2", "混ぜた確率 2連単1点", "予想とオッズを混ぜた確率で、2連単上位3つの期待値が一番高い目(1.1以上)"],
+  ["bl10", "混ぜた確率 1位固定10%切替", "混ぜた確率で1位固定10%切替、買う形の期待値1.1以上"],
   ["ex3_10sw_ev", "1位固定 10%切替 期待値1.3", "1位固定10%切替を、買う形の期待値が1.3以上の時だけ"], ["ex3_20_ev", "1位固定 20% 期待値1.3", "1位固定20%を、買う目の期待値(確率の合計×合成オッズ)が1.3以上の時だけ"]];
 function betSplit(odds, total = 1000) {
   const inv = odds.map((o) => 1 / o), sm = inv.reduce((a, b) => a + b, 0);
@@ -1141,6 +1143,7 @@ function betsOf(pre, post, live) {
     const e1 = (post.ex1 || [])[0]; if (e1) put("post_ex1", [[e1.k, 100, e1.o ?? null]]);
     tri("bal", post.bal);
     const f2 = (post.f2ex || [])[0]; if (f2) put("f2ex", [[f2.k, 100, f2.o ?? null]]);
+    for (const nm of ["bl2", "bl10"]) if (post[nm]?.buy) put(nm, post[nm].buy);
     for (const nm of ["f2x", "f2x_m", "f3x"]) put(nm, (post[nm] || []).flatMap((z) => z.buy || []));
     const ex = (post.ex || [])[0];
     if (ex) {
