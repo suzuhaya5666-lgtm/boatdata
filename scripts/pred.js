@@ -33,6 +33,7 @@ state.date = date;
 state.day = dayData;
 if (!dayData) process.exit(0);
 const model = J("data/model/weights.json"), vs = J("data/stats/venues.json");
+globalThis.GCOURSE = J("data/model/gcourse.json");   // SG・G1でのコース別成績
 const nowD = new Date(Date.now() + 9 * 3600 * 1000).toISOString();
 const now = nowD.slice(11, 16), today = nowD.slice(0, 10);
 const SPLIT = 12;

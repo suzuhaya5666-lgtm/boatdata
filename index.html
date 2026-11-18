@@ -2129,6 +2129,12 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
       if (!lv || me == null || !xs.length) return 0;
       return Math.max(0, me - xs.reduce((a, c) => a + c, 0) / xs.length);
     }
+    if (f === "sg_c1" || f === "sg_c2" || f === "sg_c3") {  // SG・G1のレースだけ: SG・G1でのコース別 1着・2連対・3連対率(×10)
+      const g = state.day?.venues?.[race?._v || state.venue]?.grade;
+      if (g !== "SG" && g !== "G1") return 0;
+      const x = globalThis.GCOURSE?.racers?.[e.regno]?.[String(k)];
+      return x ? x[Number(f.slice(-1)) - 1] : null;
+    }
     if (f === "lady_mix") {  // 女子(男女混合): 男女混合レースの女子選手なら1、全員女子・全員男子のレースは0
       if (!model.female || !e.regno) return null;
       const fs = new Set(model.female), nf = Object.values(ents).filter((x) => x?.regno && fs.has(x.regno)).length;
@@ -2186,6 +2192,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     if (f === "parts") return bi?.entries?.[b] ? (bi.entries[b].parts?.join("・") || "なし") : null;
     if (f === "local") { const x = val(f, b, k); return x == null ? null : x ? "地元" : "地元外"; }
     if (f === "lady_mix") { const x = val(f, b, k); return x == null ? null : x ? "女子(混合)" : "-"; }
+    if (f === "sg_c1" || f === "sg_c2" || f === "sg_c3") { const x = val(f, b, k); return x ? `${(x * 10).toFixed(1)}%` : "-"; }
     if (f === "local_slow") { const x = val(f, b, k); return x ? `+${x.toFixed(2)}秒` : "-"; }
     if (f === "ex_st") return (bi?.start || []).find((x) => x.boat === b)?.st ?? null;
     return val(f, b, k);
@@ -2343,7 +2350,7 @@ async function computeDeme(race, lean) {
   const vc = race._v || state.venue;
   const hd = state.date.replace(/-/g, "");
   const [model, vs, bi, ...files] = await Promise.all([
-    cached("data/model/weights.json"), cached("data/stats/venues.json"),
+    cached("data/model/weights.json"), cached("data/stats/venues.json").then(async (x) => { globalThis.GCOURSE ??= await cached("data/model/gcourse.json").catch(() => null); return x; }),
     getBefore(hd, vc, race.no).then((b) => withSeries(b, hd, vc)),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
   if (!model || !vs) return null;
@@ -2380,7 +2387,7 @@ async function drawDemeTab(v, race, keepPos) {
   if (!keepPos) loading();
   const hd = state.date.replace(/-/g, "");
   const [model, vs, bi, ...files] = await Promise.all([
-    cached("data/model/weights.json"), cached("data/stats/venues.json"),
+    cached("data/model/weights.json"), cached("data/stats/venues.json").then(async (x) => { globalThis.GCOURSE ??= await cached("data/model/gcourse.json").catch(() => null); return x; }),
     getBefore(hd, state.venue, race.no).then((b) => withSeries(b, hd, state.venue)),
     ...race.entries.map((e) => cached(`data/stats/racers/${e.regno}.json`))]);
   const kimModel = await cached("data/model/kimarite.json");

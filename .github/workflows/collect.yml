@@ -56,6 +56,9 @@ jobs:
         run: |
           python scripts/collect.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" --workers "${{ inputs.workers || '1' }}" --max-minutes 90 ${{ inputs.reparse && '--reparse' || '' }}
 
+      - name: SG・G1でのコース別成績(画面・予想用)
+        run: python -u scripts/gcourse.py || true
+
       - name: 締切時オッズ(前日と今日の終わったレース)
         run: python -u scripts/odds.py --max-minutes 25
 
