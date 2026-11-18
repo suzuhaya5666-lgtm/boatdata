@@ -474,7 +474,13 @@ def main():
                     res[str(no)][key] = {"n": len(rs), "pts": sum(r[1] for r in rs),
                                          "p1": sum(r[2] == 1 for r in rs), "p2": sum(r[2] == 2 for r in rs),
                                          "p3": sum(r[2] == 3 for r in rs)}
-        mout["venues"][code] = {"start": start.isoformat(), "motors": res}
+        # 入れ替え後に何節目か(開催日が2日以上あいたら次の節)。3節目までは画面に「新」を出す
+        held = sorted({d for d, c, *_ in races if c == code and d >= start})
+        setsu = 0
+        for j, d in enumerate(held):
+            if j == 0 or (d - held[j - 1]).days > 1:
+                setsu += 1
+        mout["venues"][code] = {"start": start.isoformat(), "setsu": setsu, "last": held[-1].isoformat() if held else None, "motors": res}
     with open(os.path.join(DATA, "stats", "motors.json"), "w", encoding="utf-8") as f:
         json.dump(mout, f, ensure_ascii=False, separators=(",", ":"))
 

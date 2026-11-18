@@ -882,6 +882,9 @@ async function drawCardTab(v, race) {
 
   const mdays = meetDaysOf(meet);
   const fd = (await cached("data/stats/fdelta.json").catch(() => null))?.delta;
+  // モーター入れ替え後3節目までは「新」(2連率がまだあてにならない)
+  const mv = (await cached("data/stats/motors.json").catch(() => null))?.venues?.[state.venue];
+  const newMotor = mv && mv.setsu <= 3 && state.date >= mv.start;
   // F持ちのときの平均ST(このレースのコース)。本数が少なければ、ふだんの平均 + F持ちで遅くなる平均量 で「想定」
   // 前の期のF: 期が変わるとF数は0に戻るが、F休みまでは少し慎重(全選手3年分: 期の1〜2か月目 F1 +.006・F2 +.019、3〜4か月目 +.003・+.013、5〜6か月目 0・+.008)
   const PREVF = { 1: [0.006, 0.003, 0], 2: [0.019, 0.013, 0.008] };
@@ -959,7 +962,7 @@ async function drawCardTab(v, race) {
       })(), "", `<span class="${l ? "red" : ""}">L${l}</span>`, "")}</td>
       <td>${two(fmt(e.nat_win), col.natWin[i], `${fmt(e.nat_2, 1)}%`, col.nat2[i])}</td>
       <td>${two(fmt(e.loc_win), col.locWin[i], `${fmt(e.loc_2, 1)}%`, col.loc2[i])}</td>
-      <td>${two(`<small>No.</small>${e.motor_no ?? "-"}`, "", `${fmt(e.motor_2, 1)}%`, col.motor2[i])}</td>
+      <td>${two(`<small>No.</small>${e.motor_no ?? "-"}${newMotor ? '<small style="color:#c33;font-weight:bold"> 新</small>' : ""}`, "", `${fmt(e.motor_2, 1)}%`, col.motor2[i])}</td>
       <td>${two(`<small>No.</small>${e.boat_no ?? "-"}`, "", `${fmt(e.boat_2, 1)}%`, col.boat2[i])}</td>
       <td class="mcell">${meetGrid(meet[e.regno], mdays)}</td>
       ${hasResult ? `<td>${two(e.exh != null ? fmt(e.exh) : "-", col.exh[i], `進入 ${e.course ?? "-"}`, "")}</td>
