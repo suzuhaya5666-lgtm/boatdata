@@ -264,7 +264,12 @@ SITE = "https://suzuhaya5666-lgtm.github.io/boatdata/"
 
 
 def notify(day_s, races, now, day=None):
-    topic = os.environ.get("NTFY_TOPIC")
+    topic = os.environ.get("NTFY_TOPIC")   # GitHub の Secret があればそちら、なければ config/notify.json
+    if not topic:
+        cp = os.path.join(DATA, "..", "config", "notify.json")
+        if os.path.exists(cp):
+            with open(cp, encoding="utf-8") as f:
+                topic = json.load(f).get("ntfy_topic")
     if not topic:
         return
     import pnl
