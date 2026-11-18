@@ -484,8 +484,30 @@ def before_feats(day, code, no, boat):
     return [np.nan if v is None else v, (1.0 if be.get("parts") else 0.0) if be else np.nan, np.nan if t is None else float(t)]
 
 
+def motor_changes():
+    """場ごとのモーターの入れ替え日: 番組表のモーター2連率(中央値)が一斉に0近くに戻った日。"""
+    import glob
+    import statistics
+    out, prev = collections.defaultdict(list), {}
+    for p in sorted(glob.glob(os.path.join(DATA, "races", "*", "*.json"))):
+        with open(p, encoding="utf-8") as f:
+            d = json.load(f)
+        day = dt.date.fromisoformat(d["date"])
+        for code, v in d["venues"].items():
+            es = [e for r in v["races"].values() for e in (r["entries"].values() if isinstance(r["entries"], dict) else r["entries"])]
+            m = [e["motor_2"] for e in es if e.get("motor_2") is not None]
+            if not m:
+                continue
+            med = statistics.median(m)
+            if prev.get(code) is not None and prev[code] > 20 and med < 3:
+                out[code].append(day)
+            prev[code] = med
+    return out
+
+
 def motor_by_expect(E):
-    """モーターの調子: その場の直近 MOTOR_DAYS 日の(着順 − 予想の着順)の平均を走数で0に寄せる。小さいほど好調。"""
+    """モーターの調子: その場の直近 MOTOR_DAYS 日の(着順 − 予想の着順)の平均を走数で0に寄せる。小さいほど好調。
+    モーターの入れ替え日より前の成績は、同じ番号でも別のモーターなので使わない。"""
     mrec = collections.defaultdict(list)
     for code, rg, day, no, c, pl, mno in RESULTS:
         if mno is None:
@@ -496,13 +518,17 @@ def motor_by_expect(E):
         v.sort(key=lambda x: x[0])
     out = np.full((len(ROWMETA), 7), np.nan)
     import bisect
+    chg = motor_changes()
     for i, (code, day, no, regs, motors) in enumerate(ROWMETA):
+        cs = chg.get(code, [])
+        j = bisect.bisect_right(cs, day)
+        lo = max(day - dt.timedelta(days=MOTOR_DAYS), cs[j - 1]) if j else day - dt.timedelta(days=MOTOR_DAYS)
         for k in range(1, 7):
             lst = mrec.get((code, motors.get(k)))
             if not lst:
                 continue
             ds = [d for d, _ in lst]
-            a, b = bisect.bisect_left(ds, day - dt.timedelta(days=MOTOR_DAYS)), bisect.bisect_left(ds, day)
+            a, b = bisect.bisect_left(ds, lo), bisect.bisect_left(ds, day)
             xs = [x for _, x in lst[a:b]]
             if xs:
                 out[i, k] = float(np.mean(xs)) * len(xs) / (len(xs) + MOTOR_K)

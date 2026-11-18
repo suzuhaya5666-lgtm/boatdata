@@ -151,6 +151,10 @@ def build(day, code):
                         continue
                     ev = (ex.get(f"{code}_{int(r.get('no')):02d}") or {}).get(str(e.get("boat")))
                     acc.setdefault(e["motor_no"], []).append((e.get("place") or 6) - (ev if ev is not None else cm[c]))
+            # モーターの入れ替え日(番組表のモーター2連率がほぼ0)より前は別のモーターなので、そこで止める
+            m2 = sorted(e["motor_2"] for r in pv.get("races", {}).values() for e in r.get("entries", []) if e.get("motor_2") is not None)
+            if m2 and m2[len(m2) // 2] < 3:
+                break
         motors = {str(m): round(sum(x) / len(x) * len(x) / (len(x) + mk), 4) for m, x in acc.items()}
     # 直近の調子: 5場の直近N日(蒲郡180日・ほか365日)の(着順 − 予想の着順)の平均を走数で寄せる。model.py と同じ
     fdays = (w.get("form_days") or {}).get(code, w.get("form_days_default"))
