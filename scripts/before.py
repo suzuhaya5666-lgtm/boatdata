@@ -257,6 +257,71 @@ def run_pred(day_s, codes):
         print(f"予想の保存失敗 {e}")
 
 
+# いいレースの通知(ntfy)。締切直前に、決めた買い方の買い目が出たら1回だけ送る
+NOTIFY = {"f2x": "2連複1.5切替", "f2x_m": "2連複1.5切替(中間)", "f3x": "3連複1.5切替",
+          "bl2": "混ぜた確率 2連単1点", "bl10": "混ぜた確率 1位固定10%切替", "ex3_10sw_ev": "1位固定10%切替 期待値1.3"}
+SITE = "https://suzuhaya5666-lgtm.github.io/boatdata/"
+
+
+def notify(day_s, races, now, day=None):
+    topic = os.environ.get("NTFY_TOPIC")
+    if not topic:
+        return
+    import pnl
+    sent_p = os.path.join(DATA, "live", day_s, "notified.json")
+    sent = {}
+    if os.path.exists(sent_p):
+        with open(sent_p, encoding="utf-8") as f:
+            sent = json.load(f)
+    changed = False
+    for code, no in sorted(races):
+        pp = os.path.join(DATA, "pred", day_s, f"{code}.json")
+        lp = os.path.join(DATA, "live", day_s, f"{code}_{int(no):02d}.json")
+        if not os.path.exists(pp):
+            continue
+        with open(pp, encoding="utf-8") as f:
+            slot = (json.load(f).get("races") or {}).get(str(int(no))) or {}
+        post = slot.get("post")
+        if not post:
+            continue
+        live = None
+        if os.path.exists(lp):
+            with open(lp, encoding="utf-8") as f:
+                live = json.load(f)
+        try:
+            b = pnl.bets(None, post, {}, live)
+        except Exception as e:
+            print("通知の買い目計算失敗", e)
+            continue
+        key = f"{code}_{int(no):02d}"
+        done = set(sent.get(key, []))
+        new = [k for k in NOTIFY if k in b and k not in done]
+        if not new:
+            continue
+        lines = []
+        for k in new:
+            items = b[k][2]
+            lines.append(f"【{NOTIFY[k]}】 " + " / ".join(f"{c} {a:,}円" for c, a, *_ in items))
+        dl = (((day or {}).get("venues", {}).get(code) or {}).get("races", {}).get(str(int(no))) or {}).get("deadline") or ""
+        if dl and f"{now:%H:%M}" >= dl:   # 締切を過ぎたら送らない
+            continue
+        title = f"{VENUES.get(code, code)} {int(no)}R 締切{dl}"
+        try:
+            subprocess.run(["curl", "-sS", "--max-time", "15", "-H", f"Title: {title}", "-H", "Tags: boat",
+                            "-H", f"Click: {SITE}", "-d", "\n".join(lines), f"https://ntfy.sh/{topic}"],
+                           capture_output=True, timeout=20)
+            print("通知", title, lines)
+        except Exception as e:
+            print("通知失敗", e)
+            continue
+        sent[key] = sorted(done | set(new))
+        changed = True
+    if changed:
+        os.makedirs(os.path.dirname(sent_p), exist_ok=True)
+        with open(sent_p, "w", encoding="utf-8") as f:
+            json.dump(sent, f, ensure_ascii=False)
+
+
 def near_odds():
     """締切直前のレースだけ、オッズを取り直して展示後の予想を作り直す。取ったら True"""
     now = dt.datetime.now(JST)
@@ -269,6 +334,7 @@ def near_odds():
     if not t:
         return False
     run_pred(f"{now:%Y%m%d}", sorted({c for c, _ in t}))
+    notify(f"{now:%Y%m%d}", t, now, day)
     return True
 
 

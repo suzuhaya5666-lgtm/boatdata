@@ -37,6 +37,7 @@ jobs:
       - name: 直前情報の取得(5分ごと)
         env:
           GH_TOKEN: ${{ github.token }}
+          NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

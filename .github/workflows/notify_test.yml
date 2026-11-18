@@ -1,0 +1,13 @@
+name: notify_test
+
+# 通知(ntfy)が届くかの確認用
+on:
+  workflow_dispatch:
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          curl -sS -H "Title: ボートデータ 通知テスト" -H "Tags: boat" -H "Click: https://suzuhaya5666-lgtm.github.io/boatdata/" \
+            -d "この通知が届いていれば設定OKです。締切6分前〜に買い目が出たレースを送ります。" "https://ntfy.sh/${{ secrets.NTFY_TOPIC }}"
