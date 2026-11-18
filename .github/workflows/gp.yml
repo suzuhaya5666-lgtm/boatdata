@@ -1,0 +1,39 @@
+name: gp
+
+# グランプリの獲得賞金ランキング(60位まで)を毎日取る
+on:
+  schedule:
+    - cron: "23 1 * * *"     # 毎日 10:23(日本時間)
+    - cron: "41 13 * * *"    # 毎日 22:41(日本時間)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: gp
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -u scripts/gpranking.py
+      - name: 保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/gp
+          git diff --cached --quiet && exit 0
+          git commit -m "グランプリ賞金ランキング更新"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+          # bot の push では公開が動かないので、公開を呼ぶ
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches -f ref=main
+        env:
+          GH_TOKEN: ${{ github.token }}

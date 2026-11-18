@@ -3199,6 +3199,31 @@ async function renderSearch() {
   }
   drawSearch();
 }
+// グランプリ獲得賞金ランキング(60位まで)。18位までがグランプリ、それ以降はシリーズ戦の目安
+async function gpRankCard() {
+  let gp;
+  try { gp = await cached("data/gp/ranking.json"); } catch (e) { gp = null; }
+  if (!gp?.racers?.length) return "";
+  const man = (y) => (y / 10000).toLocaleString("ja-JP", { maximumFractionDigits: 0 });
+  const mv = (r) => {
+    const o = gp.prev?.[r.regno];
+    if (o == null) return gp.prev_asof ? '<small class="cnt">新</small>' : "";
+    if (o === r.rank) return '<small class="cnt">→</small>';
+    return o > r.rank ? `<small style="color:#c33">↑${o - r.rank}</small>` : `<small style="color:#36c">↓${r.rank - o}</small>`;
+  };
+  const b18 = gp.racers.find((r) => r.rank === 18);
+  const row = (r) => `<tr class="srow" data-sreg="${r.regno}"><td>${r.rank}<br>${mv(r)}</td>
+    <td><b>${esc(r.name)}</b><br><small class="cnt">${r.regno}</small></td><td>${esc(r.branch)}</td><td>${esc(r.cls)}</td>
+    <td>${man(r.money)}万${b18 && r.rank > 18 ? `<br><small class="cnt">18位まで${man(b18.money - r.money)}万</small>` : ""}</td></tr>`;
+  const sep = (t) => `<tr><td colspan="5" style="background:#f3f0e8;font-size:12px;font-weight:bold">${t}</td></tr>`;
+  return `<div class="card"><h2>グランプリ 獲得賞金ランキング</h2>
+    <small class="cnt">${esc(gp.asof || "")}（${esc(gp.fetched || "")}取得）　選手をタップすると成績が見られます</small>
+    <div class="tbl"><table class="cmp"><thead><tr><th>順位</th><th>選手</th><th>支部</th><th>級別</th><th>賞金</th></tr></thead><tbody>
+    ${sep("グランプリ出場圏(18位まで)")}${gp.racers.filter((r) => r.rank <= 18).map(row).join("")}
+    ${sep("19位〜60位(シリーズ戦の目安)")}${gp.racers.filter((r) => r.rank > 18).map(row).join("")}
+    </tbody></table></div></div>`;
+}
+
 async function drawSearch() {
   let ix;
   try { ix = await cached("data/stats/racer_index.json"); } catch (e) { ix = null; }
@@ -3214,6 +3239,7 @@ async function drawSearch() {
     const seen = seenRacers();
     html = seen.length ? `<div class="card"><h2>最近見た選手</h2><div class="tbl"><table class="cmp"><tbody>${seen.map(([reg, nm]) =>
       `<tr class="srow" data-sreg="${reg}"><td><b>${esc(nm)}</b> <small class="cnt">${reg}</small></td></tr>`).join("")}</tbody></table></div></div>` : "";
+    html += await gpRankCard();
   } else {
     const hit = ix.racers.filter((r) => (SR.cls === "all" || r[2] === SR.cls) && (/^\d+$/.test(q) ? r[0].startsWith(q) : normName(r[1]).includes(q)));
     html = `<div class="card"><h2>${hit.length}人${hit.length > 60 ? "（60人まで表示）" : ""}</h2>
