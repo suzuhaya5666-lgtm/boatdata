@@ -37,7 +37,7 @@ def parse(html):
         if not (rk and mo):
             continue
         name = re.sub(r"[\s　]+", " ", re.sub(r"<[^>]+>", "", nm.group(1))).strip() if nm else ""
-        name = re.sub(r"^(\S+)\s+(.*)$", lambda x: x.group(1) + " " + x.group(2).replace(" ", ""), name)
+        name = name.replace(" ", "")   # 1文字ずつ空白が入るので詰める(姓名の区切りは画面で選手一覧の名前を使う)
         rows.append({"rank": int(rk.group(1)), "regno": reg, "name": name,
                      "branch": text(sb.group(1)) if sb else "", "cls": text(ky.group(1)) if ky else "",
                      "money": int(mo.group(1).replace(",", ""))})

@@ -3211,9 +3211,11 @@ async function gpRankCard() {
     if (o === r.rank) return '<small class="cnt">→</small>';
     return o > r.rank ? `<small style="color:#c33">↑${o - r.rank}</small>` : `<small style="color:#36c">↓${r.rank - o}</small>`;
   };
+  let ix = null; try { ix = await cached("data/stats/racer_index.json"); } catch (e) { /* なし */ }
+  const nm = Object.fromEntries((ix?.racers || []).map((r) => [r[0], r[1]]));
   const b18 = gp.racers.find((r) => r.rank === 18);
   const row = (r) => `<tr class="srow" data-sreg="${r.regno}"><td>${r.rank}<br>${mv(r)}</td>
-    <td><b>${esc(r.name)}</b><br><small class="cnt">${r.regno}</small></td><td>${esc(r.branch)}</td><td>${esc(r.cls)}</td>
+    <td><b>${esc(nm[r.regno] || r.name)}</b><br><small class="cnt">${r.regno}</small></td><td>${esc(r.branch)}</td><td>${esc(r.cls)}</td>
     <td>${man(r.money)}万${b18 && r.rank > 18 ? `<br><small class="cnt">18位まで${man(b18.money - r.money)}万</small>` : ""}</td></tr>`;
   const sep = (t) => `<tr><td colspan="5" style="background:#f3f0e8;font-size:12px;font-weight:bold">${t}</td></tr>`;
   return `<div class="card"><h2>グランプリ 獲得賞金ランキング</h2>
