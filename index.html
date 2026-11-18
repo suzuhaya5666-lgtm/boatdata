@@ -2111,6 +2111,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
       return x != null && cm ? -(x - cm[k]) : null;
     }
     if (f === "exh") return bi?.entries?.[b]?.exh ?? e.exh ?? null;
+    if (f.startsWith("exh_")) return f.slice(4) === (race?._v || state.venue) ? (bi?.entries?.[b]?.exh ?? e.exh ?? null) : null;  // 場ごとの展示タイム(その場だけ)
     if (f === "setsu") return bi?.series?.racers?.[e.regno]?.setsu ?? null;  // 節間成績(小さいほど好調)
     if (f === "motor_form") return bi?.series?.motors?.[e.motor_no] ?? null;  // モーターの調子(小さいほど好調)
     if (f === "ex_st") {  // 展示ST(Fは .00 扱い)
@@ -2193,6 +2194,7 @@ function demeAdjust(q, order, ents, racers, bi, model, race) {
     if (f === "local") { const x = val(f, b, k); return x == null ? null : x ? "地元" : "地元外"; }
     if (f === "lady_mix") { const x = val(f, b, k); return x == null ? null : x ? "女子(混合)" : "-"; }
     if (f === "sg_c1" || f === "sg_c2" || f === "sg_c3") { const x = val(f, b, k); return x ? `${(x * 10).toFixed(1)}%` : "-"; }
+    if (f.startsWith("exh_")) { const x = val(f, b, k); return x == null ? "-" : `${x.toFixed(2)}`; }
     if (f === "local_slow") { const x = val(f, b, k); return x ? `+${x.toFixed(2)}秒` : "-"; }
     if (f === "ex_st") return (bi?.start || []).find((x) => x.boat === b)?.st ?? null;
     return val(f, b, k);
