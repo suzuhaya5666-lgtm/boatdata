@@ -39,5 +39,6 @@ jobs:
           git add data/model
           if git diff --cached --quiet; then echo "変更なし"; exit 0; fi
           git commit -q -m "出目確率の重み $(TZ=Asia/Tokyo date '+%Y-%m')"
-          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+          # 学習には何時間もかかるので、その間にほかの処理が同じファイルを書いていたら、こちらの結果を優先する
+          for i in 1 2 3 4 5; do git pull --rebase -X theirs -q && git push -q && break; git rebase --abort 2>/dev/null; sleep 10; done
           gh api -X POST repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches -f ref=main
