@@ -139,6 +139,9 @@
   .pay .pp { color: var(--sub); font-size: 12px; }
   .nm[data-reg] { color: var(--accent); cursor: pointer; }
   td.name .nm { text-decoration: underline; text-decoration-color: #b8cff0; }
+  /* 女子選手の名前はピンク */
+  .nm[data-reg].fem, .fem-name.fem, [data-sreg].fem b { color: #e0479e; }
+  td.name .nm.fem { text-decoration-color: #f3b6d6; }
 
   /* ---- 詳細タブ */
   .dtabs { display: flex; margin-top: 10px; border-bottom: 1px solid var(--line); overflow-x: auto; }
@@ -3298,7 +3301,7 @@ async function openRacer(regno, course) {
     const total = Object.values(sh.course).reduce((a, x) => a + x.n, 0);
     $("sheet").innerHTML = `
       <button class="close" id="mclose">閉じる</button>
-      <h2>${esc(r.name)} <small style="color:var(--sub)">${r.regno}</small></h2>
+      <h2><span class="fem-name" data-freg="${r.regno}">${esc(r.name)}</span> <small style="color:var(--sub)">${r.regno}</small></h2>
       ${r.prof ? `<div class="meta"><span><b>${esc(r.prof.class || "-")}</b></span><span>${esc(r.prof.branch || "")}</span>${r.prof.age ? `<span>${r.prof.age}歳</span>` : ""}${r.prof.weight ? `<span>${r.prof.weight}kg</span>` : ""}${r.prof.nat_win ? `<span>全国勝率 ${r.prof.nat_win}</span>` : ""}${r.prof.nat_2 ? `<span>2連率 ${r.prof.nat_2}%</span>` : ""}</div>` : ""}
       <div class="meta"><span>${r.period.from}〜${r.period.to}</span><span>出走 ${total}</span><span>F ${sh.f}回</span></div>
       ${chipRow("sg", gradeOpts(r.female), state.g)}
@@ -3331,6 +3334,18 @@ $("view-race").addEventListener("click", (ev) => {
   const n = ev.target.closest(".nm");
   if (n && n.dataset.reg) openRacer(n.dataset.reg, n.dataset.course);
 });
+
+// 女子選手(ヴィーナス・レディースに出た選手)の名前をピンクに。画面が書き換わるたびに印を付ける
+(async () => {
+  let fem;
+  try { fem = new Set(await cached("data/model/female.json")); } catch (e) { return; }
+  const mark = (root) => root.querySelectorAll?.("[data-reg],[data-sreg],[data-freg]").forEach((el) => {
+    const r = el.dataset.reg || el.dataset.sreg || el.dataset.freg;
+    el.classList.toggle("fem", fem.has(r));
+  });
+  mark(document);
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.nodeType === 1) { mark(n); if (n.matches?.("[data-reg],[data-sreg],[data-freg]")) mark(n.parentNode); } }))).observe(document.body, { childList: true, subtree: true });
+})();
 
 init();
 </script>
