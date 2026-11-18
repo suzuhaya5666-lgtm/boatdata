@@ -13,6 +13,7 @@
 import collections
 import datetime as dt
 import json
+import time
 import os
 import re
 import sys
@@ -25,6 +26,7 @@ from collect import DATA, JST, VENUES  # noqa: E402
 from stats import f_period, grade_cat, load_races, started  # noqa: E402
 import gcourse  # noqa: E402
 GIDX = {}
+T0 = time.time()
 from collect import load_grades  # noqa: E402
 
 M = 10           # 回数が少ないときに場平均へ寄せる強さ(10走分)
@@ -852,7 +854,17 @@ def main():
     LQ_tr = base_lq(X, N, P, W_tr)
     combos = {}
     ng = len(GROUPS)
-    for mask in range(1 << (ng + 1)):
+    # 組み合わせは全部で 2^(組の数+1) 通り。時間切れ(5時間)にならないよう、いつもの組み合わせに近い順に、
+    # 時間の許す分だけ作る(作れなかった組み合わせは画面でいつもの係数を使う)
+    dm = (1 << (ng + 1)) - 1
+    for g in DEFAULT_OFF:
+        dm &= ~(1 << g)
+    order = sorted(range(1 << (ng + 1)), key=lambda m: (bin(m ^ dm).count("1"), m))
+    budget = float(os.environ.get("MODEL_BUDGET_MIN", "235")) * 60
+    for mask in order:
+        if time.time() - T0 > budget:
+            print(f"時間の都合で組み合わせは {len(combos)}通りまで")
+            break
         feats = [i for g in range(ng) if mask >> g & 1 for i in GROUPS[g]]
         use_cb = bool(mask >> ng & 1)
         c_tr, b_tr = fit_logit(LQ_tr, Z, Y, V, S, KD, feats, use_cb, rows=tr)
