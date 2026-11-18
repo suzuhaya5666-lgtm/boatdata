@@ -1,0 +1,489 @@
+{
+ "asof": "2026年11月17日現在",
+ "fetched": "2026-11-18 11:53",
+ "source": "https://www.boatrace-grandprix.jp/2026/rtg/sp/ranking.php",
+ "prev_asof": null,
+ "prev": {},
+ "racers": [
+  {
+   "rank": 1,
+   "regno": "4320",
+   "name": "峰 竜太",
+   "branch": "佐賀",
+   "cls": "A1",
+   "money": 182073000
+  },
+  {
+   "rank": 2,
+   "regno": "4500",
+   "name": "山 田康二",
+   "branch": "佐賀",
+   "cls": "A1",
+   "money": 130881338
+  },
+  {
+   "rank": 3,
+   "regno": "5121",
+   "name": "定 松勇樹",
+   "branch": "佐賀",
+   "cls": "A1",
+   "money": 129842000
+  },
+  {
+   "rank": 4,
+   "regno": "3941",
+   "name": "池 田浩二",
+   "branch": "愛知",
+   "cls": "A1",
+   "money": 118431000
+  },
+  {
+   "rank": 5,
+   "regno": "3897",
+   "name": "白 井英治",
+   "branch": "山口",
+   "cls": "A1",
+   "money": 117166000
+  },
+  {
+   "rank": 6,
+   "regno": "4686",
+   "name": "丸 野一樹",
+   "branch": "滋賀",
+   "cls": "A1",
+   "money": 115796200
+  },
+  {
+   "rank": 7,
+   "regno": "4166",
+   "name": "吉 田拡郎",
+   "branch": "岡山",
+   "cls": "A1",
+   "money": 104846000
+  },
+  {
+   "rank": 8,
+   "regno": "4262",
+   "name": "馬 場貴也",
+   "branch": "滋賀",
+   "cls": "A1",
+   "money": 104300200
+  },
+  {
+   "rank": 9,
+   "regno": "4418",
+   "name": "茅 原悠紀",
+   "branch": "岡山",
+   "cls": "A1",
+   "money": 94278466
+  },
+  {
+   "rank": 10,
+   "regno": "4344",
+   "name": "新 田雄史",
+   "branch": "三重",
+   "cls": "A1",
+   "money": 88311200
+  },
+  {
+   "rank": 11,
+   "regno": "4719",
+   "name": "上 條暢嵩",
+   "branch": "大阪",
+   "cls": "A1",
+   "money": 87270000
+  },
+  {
+   "rank": 12,
+   "regno": "4238",
+   "name": "毒 島誠",
+   "branch": "群馬",
+   "cls": "A1",
+   "money": 84213399
+  },
+  {
+   "rank": 13,
+   "regno": "4371",
+   "name": "西 山貴浩",
+   "branch": "福岡",
+   "cls": "A1",
+   "money": 81465000
+  },
+  {
+   "rank": 14,
+   "regno": "4444",
+   "name": "桐 生順平",
+   "branch": "埼玉",
+   "cls": "A1",
+   "money": 79212000
+  },
+  {
+   "rank": 15,
+   "regno": "4205",
+   "name": "山 口剛",
+   "branch": "広島",
+   "cls": "A1",
+   "money": 79041000
+  },
+  {
+   "rank": 16,
+   "regno": "4503",
+   "name": "上 野真之介",
+   "branch": "佐賀",
+   "cls": "A1",
+   "money": 77832466
+  },
+  {
+   "rank": 17,
+   "regno": "4586",
+   "name": "磯 部誠",
+   "branch": "愛知",
+   "cls": "A1",
+   "money": 71323000
+  },
+  {
+   "rank": 18,
+   "regno": "4907",
+   "name": "小 池修平",
+   "branch": "大阪",
+   "cls": "A1",
+   "money": 70277400
+  },
+  {
+   "rank": 19,
+   "regno": "4939",
+   "name": "宮之原 輝紀",
+   "branch": "東京",
+   "cls": "A1",
+   "money": 68769000
+  },
+  {
+   "rank": 20,
+   "regno": "4337",
+   "name": "平 本真之",
+   "branch": "愛知",
+   "cls": "A1",
+   "money": 68559000
+  },
+  {
+   "rank": 21,
+   "regno": "4604",
+   "name": "岩 瀬裕亮",
+   "branch": "愛知",
+   "cls": "A1",
+   "money": 68434500
+  },
+  {
+   "rank": 22,
+   "regno": "4659",
+   "name": "木 下翔太",
+   "branch": "大阪",
+   "cls": "A1",
+   "money": 68119466
+  },
+  {
+   "rank": 23,
+   "regno": "3415",
+   "name": "松 井繁",
+   "branch": "大阪",
+   "cls": "A1",
+   "money": 67280000
+  },
+  {
+   "rank": 24,
+   "regno": "4848",
+   "name": "仲 谷颯仁",
+   "branch": "福岡",
+   "cls": "A1",
+   "money": 67256787
+  },
+  {
+   "rank": 25,
+   "regno": "4682",
+   "name": "大 上卓人",
+   "branch": "広島",
+   "cls": "A1",
+   "money": 67160466
+  },
+  {
+   "rank": 26,
+   "regno": "4573",
+   "name": "佐 藤翼",
+   "branch": "埼玉",
+   "cls": "A1",
+   "money": 67077000
+  },
+  {
+   "rank": 27,
+   "regno": "5224",
+   "name": "西 岡顕心",
+   "branch": "香川",
+   "cls": "A1",
+   "money": 66475100
+  },
+  {
+   "rank": 28,
+   "regno": "4477",
+   "name": "篠 崎仁志",
+   "branch": "福岡",
+   "cls": "A1",
+   "money": 66282000
+  },
+  {
+   "rank": 29,
+   "regno": "3783",
+   "name": "瓜 生正義",
+   "branch": "福岡",
+   "cls": "A1",
+   "money": 65662766
+  },
+  {
+   "rank": 30,
+   "regno": "4445",
+   "name": "宮 地元輝",
+   "branch": "佐賀",
+   "cls": "A1",
+   "money": 65338000
+  },
+  {
+   "rank": 31,
+   "regno": "4760",
+   "name": "山 崎郡",
+   "branch": "大阪",
+   "cls": "A1",
+   "money": 65327466
+  },
+  {
+   "rank": 32,
+   "regno": "4013",
+   "name": "中 島孝平",
+   "branch": "福井",
+   "cls": "A1",
+   "money": 65270000
+  },
+  {
+   "rank": 33,
+   "regno": "4502",
+   "name": "遠 藤エミ",
+   "branch": "滋賀",
+   "cls": "A1",
+   "money": 64757000
+  },
+  {
+   "rank": 34,
+   "regno": "4350",
+   "name": "篠 崎元志",
+   "branch": "福岡",
+   "cls": "A1",
+   "money": 63332000
+  },
+  {
+   "rank": 35,
+   "regno": "5084",
+   "name": "末 永和也",
+   "branch": "佐賀",
+   "cls": "A1",
+   "money": 62325895
+  },
+  {
+   "rank": 36,
+   "regno": "3960",
+   "name": "菊 地孝平",
+   "branch": "静岡",
+   "cls": "A1",
+   "money": 61349466
+  },
+  {
+   "rank": 37,
+   "regno": "4237",
+   "name": "大 峯豊",
+   "branch": "山口",
+   "cls": "A1",
+   "money": 60962787
+  },
+  {
+   "rank": 38,
+   "regno": "4188",
+   "name": "久 田敏之",
+   "branch": "群馬",
+   "cls": "A1",
+   "money": 60547800
+  },
+  {
+   "rank": 39,
+   "regno": "4851",
+   "name": "関 浩哉",
+   "branch": "群馬",
+   "cls": "A1",
+   "money": 58576800
+  },
+  {
+   "rank": 40,
+   "regno": "4324",
+   "name": "海 野康志郎",
+   "branch": "山口",
+   "cls": "A1",
+   "money": 58568080
+  },
+  {
+   "rank": 41,
+   "regno": "4914",
+   "name": "吉 田裕平",
+   "branch": "愛知",
+   "cls": "A1",
+   "money": 57591000
+  },
+  {
+   "rank": 42,
+   "regno": "4762",
+   "name": "藤 原啓史朗",
+   "branch": "岡山",
+   "cls": "A1",
+   "money": 57569466
+  },
+  {
+   "rank": 43,
+   "regno": "4959",
+   "name": "井 上忠政",
+   "branch": "大阪",
+   "cls": "A1",
+   "money": 57299000
+  },
+  {
+   "rank": 44,
+   "regno": "4980",
+   "name": "佐々木 完太",
+   "branch": "山口",
+   "cls": "A1",
+   "money": 56259466
+  },
+  {
+   "rank": 45,
+   "regno": "4361",
+   "name": "柳 生泰二",
+   "branch": "山口",
+   "cls": "A1",
+   "money": 55553000
+  },
+  {
+   "rank": 46,
+   "regno": "4290",
+   "name": "稲 田浩二",
+   "branch": "兵庫",
+   "cls": "A1",
+   "money": 55031000
+  },
+  {
+   "rank": 47,
+   "regno": "4856",
+   "name": "豊 田健士郎",
+   "branch": "三重",
+   "cls": "A1",
+   "money": 53581799
+  },
+  {
+   "rank": 48,
+   "regno": "3590",
+   "name": "濱野谷 憲吾",
+   "branch": "東京",
+   "cls": "A1",
+   "money": 53131466
+  },
+  {
+   "rank": 49,
+   "regno": "4266",
+   "name": "長 田頼宗",
+   "branch": "東京",
+   "cls": "A1",
+   "money": 53041309
+  },
+  {
+   "rank": 50,
+   "regno": "3959",
+   "name": "坪 井康晴",
+   "branch": "静岡",
+   "cls": "A1",
+   "money": 52286787
+  },
+  {
+   "rank": 51,
+   "regno": "4932",
+   "name": "新 開航",
+   "branch": "福岡",
+   "cls": "A1",
+   "money": 50853000
+  },
+  {
+   "rank": 52,
+   "regno": "4960",
+   "name": "黒 野元基",
+   "branch": "愛知",
+   "cls": "A1",
+   "money": 50160200
+  },
+  {
+   "rank": 53,
+   "regno": "5278",
+   "name": "田 中駿兵",
+   "branch": "徳島",
+   "cls": "A1",
+   "money": 50064933
+  },
+  {
+   "rank": 54,
+   "regno": "5043",
+   "name": "中 村日向",
+   "branch": "香川",
+   "cls": "A1",
+   "money": 49937000
+  },
+  {
+   "rank": 55,
+   "regno": "4757",
+   "name": "山 田祐也",
+   "branch": "徳島",
+   "cls": "A1",
+   "money": 49774000
+  },
+  {
+   "rank": 56,
+   "regno": "4685",
+   "name": "島 村隆幸",
+   "branch": "徳島",
+   "cls": "A1",
+   "money": 49748599
+  },
+  {
+   "rank": 57,
+   "regno": "4857",
+   "name": "加 藤翔馬",
+   "branch": "兵庫",
+   "cls": "A1",
+   "money": 49191200
+  },
+  {
+   "rank": 58,
+   "regno": "4397",
+   "name": "西 村拓也",
+   "branch": "大阪",
+   "cls": "A1",
+   "money": 49011000
+  },
+  {
+   "rank": 59,
+   "regno": "4030",
+   "name": "森 高一真",
+   "branch": "香川",
+   "cls": "A1",
+   "money": 48501000
+  },
+  {
+   "rank": 60,
+   "regno": "4433",
+   "name": "川 野芽唯",
+   "branch": "福岡",
+   "cls": "A1",
+   "money": 48479000
+  }
+ ]
+}
