@@ -1,4 +1,4 @@
-"""SG・G1でのコース別成績(全24場、直近3年)。
+"""SG・G1でのコース別成績(戸田・江戸川を除く22場、直近3年)。
 
 一般戦とSG・G1では相手が違うので、同じ選手でもコースごとの1着率・連対率が変わる。
 SG・G1のレースでだけ、その選手のSG・G1でのコース別 1着率・2連対率・3連対率を予想の材料に使う。
@@ -21,6 +21,7 @@ from collect import DATA, JST, load_grades, parse_results, sections  # noqa: E40
 
 YEARS = 3
 K = 8
+SKIP = ("02", "03")   # 戸田・江戸川は水面が特殊なので使わない
 
 
 def load_rows():
@@ -42,6 +43,8 @@ def load_rows():
             continue
         secs = sections(txt, "K", all_venues=True)
         for code, lines in (secs.items() if isinstance(secs, dict) else secs):
+            if code in SKIP:
+                continue
             g = (G.get((code, f"{ds[:4]}-{ds[4:6]}-{ds[6:]}")) or {}).get("grade")
             sg = 1 if g in ("SG", "G1", "PG1") else 0
             try:
