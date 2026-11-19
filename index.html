@@ -3302,6 +3302,8 @@ async function openRacer(regno, course) {
     $("sheet").innerHTML = `
       <button class="close" id="mclose">閉じる</button>
       <h2><span class="fem-name" data-freg="${r.regno}">${esc(r.name)}</span> <small style="color:var(--sub)">${r.regno}</small></h2>
+      <a href="https://www.boatrace.jp/owpc/pc/data/racersearch/profile?toban=${r.regno}" target="_blank" rel="noopener"
+        style="display:inline-block;margin:2px 0 6px;padding:6px 12px;border:1px solid var(--line,#ccc);border-radius:16px;font-size:13px;text-decoration:none">公式プロフィール(写真・経歴) ↗</a>
       ${r.prof ? `<div class="meta"><span><b>${esc(r.prof.class || "-")}</b></span><span>${esc(r.prof.branch || "")}</span>${r.prof.age ? `<span>${r.prof.age}歳</span>` : ""}${r.prof.weight ? `<span>${r.prof.weight}kg</span>` : ""}${r.prof.nat_win ? `<span>全国勝率 ${r.prof.nat_win}</span>` : ""}${r.prof.nat_2 ? `<span>2連率 ${r.prof.nat_2}%</span>` : ""}</div>` : ""}
       <div class="meta"><span>${r.period.from}〜${r.period.to}</span><span>出走 ${total}</span><span>F ${sh.f}回</span></div>
       ${chipRow("sg", gradeOpts(r.female), state.g)}
