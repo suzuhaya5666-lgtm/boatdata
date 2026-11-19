@@ -164,8 +164,8 @@ def build():
     global GIDX
     GIDX = gcourse.index(gcourse.load_rows())
     global FEMALE
-    from female import female_set
-    FEMALE = female_set()
+    from female import female_set, with_fan
+    FEMALE = with_fan(female_set())
     print(f"女子選手 {len(FEMALE)}人", flush=True)
     races = sorted(((d, c, r, [e for e in r["entries"].values() if started(e)]) for d, c, r in load_races()),
                    key=lambda x: x[0])

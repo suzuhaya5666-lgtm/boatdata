@@ -1,0 +1,40 @@
+name: fan
+
+# 公式のファン手帳データから選手の性別を取り、女子選手の一覧(female.json)を作り直す(半年ごとに更新される)
+on:
+  schedule:
+    - cron: "17 2 * * 1"     # 毎週月曜 11:17(日本時間)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: fan
+  cancel-in-progress: false
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          sudo apt-get install -y -q lhasa >/dev/null 2>&1
+          python -u scripts/fan.py
+          python -u scripts/female.py
+      - name: 保存
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/model/fan_sex.json data/model/female.json
+          git diff --cached --quiet && exit 0
+          git commit -m "選手の性別(ファン手帳)・女子一覧を更新"
+          for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done
+          gh api -X POST repos/${{ github.repository }}/actions/workflows/pages.yml/dispatches -f ref=main

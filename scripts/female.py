@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""女子選手の登番一覧。選手の性別は手元のデータにないので、
+"""女子選手の登番一覧。
+公式のファン手帳データ(fan.py → fan_sex.json)の性別を使う。そこに載っていない選手(新人など)だけ、
 ヴィーナス・オールレディース(女子戦)に出たことのある選手を女子とする(全24場の成績ファイルから)。
 
   python scripts/female.py   → data/model/female.json に書く
@@ -37,8 +38,17 @@ def female_set():
     return out
 
 
+def with_fan(s):
+    p = os.path.join(DATA, "model", "fan_sex.json")
+    if not os.path.exists(p):
+        return s
+    with open(p, encoding="utf-8") as f:
+        sex = json.load(f).get("sex", {})
+    return {r for r, v in sex.items() if v == 2} | {r for r in s if r not in sex}
+
+
 if __name__ == "__main__":
-    s = female_set()
+    s = with_fan(female_set())
     os.makedirs(os.path.join(DATA, "model"), exist_ok=True)
     with open(os.path.join(DATA, "model", "female.json"), "w", encoding="utf-8") as f:
         json.dump(sorted(s), f, separators=(",", ":"))
