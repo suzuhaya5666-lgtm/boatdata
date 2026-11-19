@@ -35,18 +35,19 @@ OUT = os.path.join(DATA, "model", "weights.json")
 FEATURES = ["exh", "nat_win", "loc_win", "motor_2", "class", "avg_st", "f_cnt", "lap", "turn", "straight", "setsu",
             "ex_st", "parts", "tilt", "motor_form", "local", "form", "form_young",
             "slit_own", "slit_late", "slit_out", "slit_in", "lady_mix", "local_slow", "sg_c1", "sg_c2", "sg_c3"] + \
-    [f"exh_{c}" for c in sorted(VENUES)]   # 27〜: 場ごとの展示タイム(その場のレースだけ。共通の展示タイムとの差の効き方)
+    [f"exh_{c}" for c in sorted(VENUES)] + ["b_fast"]   # 27〜: 場ごとの展示タイム(その場のレースだけ。共通の展示タイムとの差の効き方)
 FEATURE_NAMES = ["展示タイム", "全国勝率", "当地勝率", "モーター2連率", "級別", "平均ST", "F持ち", "一周", "まわり足", "直線", "節間成績",
                  "展示ST", "部品交換", "チルト", "モーターの調子", "地元", "直近の調子", "直近の調子(若手)",
                  "予報スリット(自艇)", "予報スリット(自艇の遅れ)", "予報スリット(外隣)", "予報スリット(内隣)", "女子(男女混合)", "地元の展示遅れ(びわこ)", "SG・G1コース別1着率", "SG・G1コース別2連対率", "SG・G1コース別3連対率"] + \
-    [f"展示タイム({VENUES[c]})" for c in sorted(VENUES)]
+    [f"展示タイム({VENUES[c]})" for c in sorted(VENUES)] + ["B級なのにA級全員より展示が速い(一般戦)"]
 # 材料のまとまり(画面で一緒にオン・オフする単位)。オリジナル展示の3つは1つにまとめる
 # 女子(男女混合): 男女混合レースの女子選手は、勝率などが同じ男子より勝ちにくい(全員女子のレースでは0)
 # 地元の展示遅れ(びわこ): びわこの地元選手は、展示タイムがレース平均より遅くても減点を弱める(遅れた秒数、速い時は0)
 # SG・G1コース別成績(24〜26)は組み合わせの数を増やさないよう「級別・女子」と同じ組に入れる
 EXH_V = list(range(27, 27 + len(VENUES)))   # 場ごとの展示タイム。数が少ないので係数を0に寄せる(EXH_V_PEN)
 EXH_V_PEN = 0.1
-GROUPS = [[0, 11, 12, 13] + EXH_V, [1], [2, 15, 23], [3], [4, 22, 24, 25, 26], [5], [6], [7, 8, 9], [10, 14, 16, 17], [18, 19, 20, 21]]
+B_FAST = 27 + len(VENUES)
+GROUPS = [[0, 11, 12, 13] + EXH_V, [1], [2, 15, 23], [3], [4, 22, 24, 25, 26, B_FAST], [5], [6], [7, 8, 9], [10, 14, 16, 17], [18, 19, 20, 21]]
 GROUP_NAMES = ["展示(タイム・ST・部品・チルト)", "全国勝率", "当地勝率・地元", "モーター2連率", "級別・女子・SG成績", "平均ST", "F持ち", "オリジナル展示", "節間成績・調子",
                "予報スリット"]
 # 予報スリット: 各艇の想定ST(F持ちでないときのそのコースの平均ST。F持ちならF持ち中の実績5本以上はその平均、なければ+FDELTA)から、
@@ -249,6 +250,14 @@ def build():
                 # 場ごとの展示タイム: その場の列にだけ展示タイムを入れる
                 if code in VCODES:
                     f[1:, 27 + VCODES.index(code)] = f[1:, 0]
+                # 一般戦(SG・G1以外)で、B級なのにA級全員より展示タイムが速い選手の印
+                f[1:, B_FAST] = 0.0
+                if grade_cat(grades.get((code, day.isoformat()))) != "sgg1":
+                    a_ex = [f[k, 0] for k in range(1, 7) if f[k, 4] >= CLS["A2"] and not np.isnan(f[k, 0])]
+                    if a_ex:
+                        for k in range(1, 7):
+                            if f[k, 4] <= CLS["B1"] and not np.isnan(f[k, 0]) and f[k, 0] < min(a_ex):
+                                f[k, B_FAST] = 1.0
                 fem = [courses[k]["regno"] in FEMALE for k in range(1, 7)]
                 f[1:, 22] = np.array(fem, float) * (1.0 if 1 <= sum(fem) <= 5 else 0.0)
                 if code == "11":
