@@ -1210,11 +1210,30 @@ async function drawBetTab(v, race, silent) {
     const status = !post ? "展示前の予想だけです（展示が出ると展示後の買い目が入ります）"
       : closed ? `締切で確定（${esc(post.odds || post.time || "")} のオッズで決定）`
       : `締切まで更新中・${esc(post.odds ? post.odds + " のオッズ" : post.time + " の予想")}（30秒ごとに読み直し）`;
+    // 当たりやすさ: その買い方が使っている出目確率で、買った目のどれかが当たる確率と、期待値(払戻の見込み÷金額)
+    const P3K = [];
+    for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) for (let c = 1; c <= 6; c++) if (a !== b && b !== c && a !== c) P3K.push(`${a}-${b}-${c}`);
+    const distOf = (k) => { const arr = ["f2x", "f3x", "f2ex"].includes(k) ? post?.p3h : ["bl2", "bl10"].includes(k) ? post?.p3b : k.startsWith("pre") ? null : post?.p3; return arr ? Object.fromEntries(P3K.map((x, i) => [x, arr[i] / 10000])) : null; };
+    const covers = (kk) => { const t = typOf(kk), n = kk.split(/[-=]/).map(Number);
+      if (t === "3連単") return [kk];
+      if (t === "2連単") return P3K.filter((x) => x.startsWith(`${n[0]}-${n[1]}-`));
+      if (t === "2連複") return P3K.filter((x) => { const y = x.split("-").map(Number); return new Set([y[0], y[1]]).size === 2 && n.includes(y[0]) && n.includes(y[1]); });
+      return P3K.filter((x) => x.split("-").map(Number).every((y) => n.includes(y))); };
+    const conf = (k, it) => {
+      const P = distOf(k); if (!P) return "";
+      const all = new Set(it.flatMap(([kk]) => covers(kk)));
+      const hp = [...all].reduce((a, x) => a + (P[x] || 0), 0);
+      const inv = it.reduce((a, x) => a + x[1], 0);
+      const okO = it.every((x) => x[2]);
+      const ev = okO ? it.reduce((a, [kk, amt, o]) => a + covers(kk).reduce((b, x) => b + (P[x] || 0), 0) * o * amt, 0) / inv : null;
+      const st = hp >= 0.35 ? "★★★" : hp >= 0.2 ? "★★☆" : "★☆☆";
+      return `<div style="font-size:12px;margin-top:2px"><span style="color:#e0a000">${st}</span> <small class="cnt">当たる確率${Math.round(hp * 100)}%${ev != null ? `・期待値${ev.toFixed(2)}` : ""}</small></div>`;
+    };
     const cards = BET_STRATS.map(([k, name, desc]) => {
       const it = bets[k];
       if (!it) return `<tr><td class="name">${esc(name)}</td><td colspan="3" class="cnt">${(k.startsWith("pre") || post) ? "買わず" : "展示後に決まります"}</td></tr>`;
       const inv = it.reduce((a, x) => a + x[1], 0), ret = po ? it.reduce((a, x) => a + payOf(x[0], x[1]), 0) : null;
-      return `<tr class="${ret > 0 ? "bhit" : ""}"><td class="name">${esc(name)}<br><small class="cnt">${inv.toLocaleString()}円</small></td>
+      return `<tr class="${ret > 0 ? "bhit" : ""}"><td class="name">${esc(name)}<br><small class="cnt">${inv.toLocaleString()}円</small>${conf(k, it)}</td>
         <td>${it.map(([kk, amt, o]) => `<div class="${po && payOf(kk, amt) > 0 ? "plus" : ""}">${cmb(kk)} <small class="cnt">${({ "3連単": "3単", "2連単": "2単", "2連複": "2複", "3連複": "3複" })[typOf(kk)]}${amt !== 100 ? " " + amt + "円" : ""}${o ? " " + o + "倍" : ""}</small></div>`).join("")}</td>
         <td class="y">${ret == null ? "-" : ret ? `<b class="plus">${ret.toLocaleString()}</b>` : "0"}</td></tr>`;
     }).join("");
@@ -1222,7 +1241,7 @@ async function drawBetTab(v, race, silent) {
       <div class="card"><h2>検証買目 ${race.no}R</h2>
         <div class="meta"><span>${status}</span>${r3 ? `<span>結果 ${esc(r3)}</span>` : ""}</div>
         <div class="tbl"><table class="cmp bdt"><thead><tr><th>買い方</th><th>買い目</th><th>払戻</th></tr></thead><tbody>${cards}</tbody></table></div>
-        <div class="note">収支タブの「集計用予想」で数えている買い目です。1点100円（流し切替は1レース1000円を払戻がそろうように配分）。オッズは買い目を決めた時点の値。展示後の買い目は、締切20分前から5分ごと、締切6分前からは30秒ごとに作り直され、締切の時刻で固定されます。</div>
+        <div class="note">★は当たりやすさ（買った目のどれかが当たる確率：★★★ 35%以上、★★☆ 20〜35%、★☆☆ 20%未満）。期待値は、その確率×オッズで出した払戻の見込みを、買った金額で割った値です（1.0より上なら得の見込み）。収支タブの「集計用予想」で数えている買い目です。1点100円（流し切替は1レース1000円を払戻がそろうように配分）。オッズは買い目を決めた時点の値。展示後の買い目は、締切20分前から5分ごと、締切6分前からは30秒ごとに作り直され、締切の時刻で固定されます。</div>
         ${post ? `<div class="meta" style="margin-top:6px"><span>逃げ ${Math.round((post.nige || 0) * 100)}%</span>${post.are ? `<span>${esc(post.are)}</span>` : ""}${post.fav ? `<span>1番人気 ${post.fav}倍</span>` : ""}</div>` : ""}
       </div>`;
   }

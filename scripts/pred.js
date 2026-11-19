@@ -106,10 +106,11 @@ function blendBets(tri, o3, o2) {
   const lp = tri.map((t, i) => BL_A * Math.log(t.p + 1e-6) + BL_B * Math.log(io[i] / si + 1e-6));
   const mx = Math.max(...lp), ex = lp.map((x) => Math.exp(x - mx)), se = ex.reduce((a, b) => a + b, 0);
   const pb = {}; tri.forEach((t, i) => { pb[t.k] = ex[i] / se; });
+  const out0 = { p3b: packP(pb) };
   const p2 = {}; for (const [k, p] of Object.entries(pb)) { const k2 = k.split("-").slice(0, 2).join("-"); p2[k2] = (p2[k2] || 0) + p; }
   const ord2 = Object.entries(p2).sort((a, b) => b[1] - a[1]);
   const r2 = (x) => Math.round(x * 100) / 100;
-  const out = {};
+  const out = out0;
   const c2 = ord2.slice(0, 3).filter(([k, p]) => o2[k] > 0 && p * o2[k] >= BL_EV).sort((a, b) => b[1] * o2[b[0]] - a[1] * o2[a[0]]);
   if (c2.length) { const [k, p] = c2[0]; out.bl2 = { ev: r2(p * o2[k]), buy: [[k, 100, o2[k]]] }; }
   const [top, pt] = ord2[0];
@@ -123,6 +124,10 @@ function blendBets(tri, o3, o2) {
   }
   return out;
 }
+
+const PERMS3 = [];
+for (let a = 1; a <= 6; a++) for (let b = 1; b <= 6; b++) for (let c = 1; c <= 6; c++) if (a !== b && b !== c && a !== c) PERMS3.push(`${a}-${b}-${c}`);
+const packP = (m) => PERMS3.map((k) => Math.round((m[k] || 0) * 10000));
 
 const PER = 1000;   // 連複系(切替あり)の1点あたりの金額
 function splitAmt(odds, total = PER) {
@@ -170,7 +175,7 @@ function f2of(adj, order, od, code, lean = 1) {
     if (w.ks) { const a = splitAmt(w.ks.map((k) => o3[k])); w.buy = w.ks.map((k, i) => [k, a[i], o3[k]]); }
     return { ...z, form: w.f, buy: w.buy };
   });
-  return { f2: top, f2ex: ok2 && best && best.ev >= 1.3 ? [best] : null, f2x: f2x?.length ? f2x : null, f3x: f3x?.length ? f3x : null };
+  return { f2: top, f2ex: ok2 && best && best.ev >= 1.3 ? [best] : null, f2x: f2x?.length ? f2x : null, f3x: f3x?.length ? f3x : null, p3h: packP(P3) };
 }
 
 function predict(code, race, bi, od) {
@@ -196,6 +201,7 @@ function predict(code, race, bi, od) {
     split: fav != null && fav >= SPLIT, combo: fav != null && fav >= SPLIT && ["07", "19"].includes(code) && a && a.lvl >= 2,
     hon: tri.slice(0, 3).map(one),
     top10list: tri.slice(0, 10).map(one),
+    p3: packP(Object.fromEntries(tri.map((t) => [t.k, t.p]))),   // 中間の出目確率(120通り×10000)
     // 2連単の確率上位3つ: オッズ・期待値と、同じ1着・2着の3連単4点流しの合成オッズ(高ければ3連単に切り替える)
     ex1: exs.slice(0, 3).map(([k, p]) => {
       const t3 = Object.entries(o3).filter(([kk, v]) => kk.startsWith(k + "-") && v > 0).map(([, v]) => v);
