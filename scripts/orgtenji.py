@@ -35,7 +35,7 @@ TOKUYAMA = "https://www.boatrace-tokuyama.jp/modules/yosou/tenji.php?day={hd}&ra
 OMURA = "https://omurakyotei.jp/yosou/sp/syussou/?day={hd}&race={rno:02d}"
 # 丸亀: スマホ版の予想ページ(その日の分だけ。日付はページ内の raceDate で確かめる)
 MARUGAME = "https://www.marugameboat.jp/asp/kyogi/15/sp/yoso05{rno:02d}.htm"
-# 住之江も丸亀と同じ作り(スマホ版の直前情報・予想ページの「オリジナル展示」タブ、その日の分だけ)
+# 住之江: スマホ版の直前情報・予想ページの「オリジナル展示」タブ(表の作りは丸亀と違う。その日の分だけ)
 SUMINOE = "https://www.boatrace-suminoe.jp/asp/kyogi/12/sp/yoso05{rno:02d}.htm"
 CMS_URL = "{base}/modules/yosou/{page}?day={hd}&race={rno}&kind=2&if=1"
 VENUES = {"06": "浜名湖", "07": "蒲郡", "08": "常滑", "11": "びわこ", "12": "住之江", "13": "尼崎", "18": "徳山", "15": "丸亀", "19": "下関", "24": "大村"}   # オリジナル展示が取れる場
@@ -155,14 +155,36 @@ def parse_marugame(html, hd):
     return out
 
 
+def parse_suminoe(html, hd):
+    """住之江(スマホ版): 「オリジナル展示」の表(id=tyokuzen04)。枠 / 選手 / 体重 / チルト / 展示 / 一周 / まわり足(直線なし)"""
+    out = {}
+    if f"raceDate={hd}" not in html or 'id="tyokuzen04"' not in html:
+        return out
+    body = html.split('id="tyokuzen04"', 1)[1].split("</table>", 1)[0]
+    for tb in re.findall(r"<tbody>(.*?)</tbody>", body, re.S):
+        m = re.search(r'class="waku0(\d)"', tb)
+        tds = re.findall(r"<td[^>]*>(.*?)</td>", tb, re.S)
+        if not m or len(tds) < 7:
+            continue
+        lap, turn = num(tds[5]), num(tds[6])
+        if lap is None and turn is None:
+            continue
+        reg = re.search(r"toban=(\d{4})", tb)
+        out[m.group(1)] = {"regno": reg.group(1) if reg else None, "exh": num(tds[4]), "lap": lap, "turn": turn, "straight": None}
+    return out
+
+
 def fetch(code, day, rno):
     """オリジナル展示を返す。取れない場・まだ出ていないときは None。"""
     if code in CMS:
         base, page, mark = CMS[code]
         html = get(CMS_URL.format(base=base, page=page, hd=f"{day:%Y%m%d}", rno=rno))
         return (parse_cms(html, mark) or None) if html else None
-    if code in ("12", "15"):
-        html = get((SUMINOE if code == "12" else MARUGAME).format(rno=rno))
+    if code == "12":
+        html = get(SUMINOE.format(rno=rno))
+        return (parse_suminoe(html, f"{day:%Y%m%d}") or None) if html else None
+    if code == "15":
+        html = get(MARUGAME.format(rno=rno))
         return (parse_marugame(html, f"{day:%Y%m%d}") or None) if html else None
     if code == "24":
         html = get(OMURA.format(hd=f"{day:%Y%m%d}", rno=rno))
