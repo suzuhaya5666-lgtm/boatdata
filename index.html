@@ -1657,15 +1657,17 @@ function openMemo(v, race, od) {
   const myKey = memoKey();
   if (!race.entries.some((e) => e.place != null || e.status)) {
     state.memoTick = (state.memoTick || 0) + 1;
-    state.memoTimer = setTimeout(async () => {
+    const tick = async () => {
       if ($("modal").hidden || memoKey() !== myKey || !$("mclose")) return;
-      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "SELECT") { openMemo(v, race, od); return; }
+      // 金額の入力中は書き換えない(10秒後にもう一度)
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "SELECT") { state.memoTimer = setTimeout(tick, 10000); return; }
       const hd = state.date.replace(/-/g, "");
       const nw = state.memoTick % 3 === 0 ? await getLive(hd, state.venue, race.no) : await getLiveRaw(hd, state.venue, race.no);
       const newer = nw && (!od?.time || (nw.time || "") >= od.time);
       if ($("modal").hidden || memoKey() !== myKey || !$("mclose")) return;
       openMemo(v, race, newer ? { ...od, ...nw } : od);
-    }, 30000);
+    };
+    state.memoTimer = setTimeout(tick, 30000);
   }
   $("mclose").onclick = () => { clearTimeout(state.memoTimer); closeModal(); drawOddsTab(v, race, true); };
   document.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => { state.memoSort = b.dataset.ms; re(); });
