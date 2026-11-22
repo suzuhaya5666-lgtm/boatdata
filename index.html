@@ -1598,6 +1598,11 @@ function openMemo(v, race, od) {
   const pr = (m) => state.memoDm?.prob?.[DEME_KEY[m.t]]?.[demeKey(m.t, m.k)] ?? null;
   const psum = list.reduce((a, m) => a + (pr(m) || 0), 0);
   const fairSynth = psum > 0 ? 1 / psum : null;
+  // 期待値 = 出目確率 × オッズ(1.0より上なら得の見込み)。全体は 払戻の見込み ÷ 購入金額
+  const evOf = (m) => { const p = pr(m), o = odd(m); return p && o ? p * o : null; };
+  const evAll = total > 0 && list.every((m) => !(m.amt > 0) || evOf(m) != null)
+    ? list.reduce((a, m) => a + (m.amt > 0 ? evOf(m) * m.amt : 0), 0) / total : null;
+  const evCls = (x) => x == null ? "" : x >= 1 ? "plus" : "minus";
   const sorted = [...list].sort((a, b) => state.memoSort === "odds" ? (odd(a) || 1e9) - (odd(b) || 1e9)
     : (a.t + a.k).localeCompare(b.t + b.k));
   const bb = (b) => `<span class="mini k${b}">${b}</span>`;
@@ -1618,6 +1623,7 @@ function openMemo(v, race, od) {
     return `<tr><td>${m.k.split(/[-=]/).map(Number).map(bb).join(ORDERED[m.t] ? "-" : "=")}${wn}<br><small class="cnt">${ONAME[m.t]}</small></td>
       <td>${ofmt(od?.[m.t]?.[m.k])}</td>
       <td class="${o && fair && o > fair ? "val" : ""}">${fair ? fair.toFixed(1) : "-"}<br><small class="cnt">${p ? (p * 100).toFixed(1) + "%" : ""}</small></td>
+      <td><b class="${evCls(evOf(m))}">${evOf(m) != null ? evOf(m).toFixed(2) : "-"}</b></td>
       <td><input class="amt" type="number" min="0" step="1" value="${(m.amt || 0) / 100}" data-t="${m.t}" data-k="${m.k}"><small>00円</small></td>
       <td class="payc">${pay != null ? pay.toLocaleString() + "円" : "-"}<br><small class="${pl >= 0 ? "plus" : "minus"}">${pl != null ? (pl >= 0 ? "+" : "") + pl.toLocaleString() + "円" : ""}</small></td>
       <td><button class="buy ${m.bought ? "on" : ""}" data-buy="${m.t}|${m.k}">${m.bought ? "購入済" : "購入"}</button></td>
@@ -1629,6 +1635,7 @@ function openMemo(v, race, od) {
     <h2>買い目メモ <small style="color:var(--sub)">${esc(v.name)} ${race.no}R</small></h2>
     <div class="card" style="margin-top:10px">
       <div class="orow"><span>合成オッズ</span><b style="font-size:20px">${synth ? synth.toFixed(1) + "倍" : "-"}</b></div>
+      <div class="orow"><span>期待値 <small class="cnt">（今の購入金額で）</small></span><b style="font-size:20px" class="${evCls(evAll)}">${evAll != null ? evAll.toFixed(2) : "-"}</b></div>
       <div class="orow"><span>目安オッズの合成 <small class="cnt">（的中確率 ${(psum * 100).toFixed(1)}%）</small></span>
         <b style="font-size:20px" class="${synth && fairSynth && synth > fairSynth ? "plus" : ""}">${fairSynth ? fairSynth.toFixed(1) + "倍" : "-"}</b></div>
       <div class="orow">
@@ -1636,16 +1643,31 @@ function openMemo(v, race, od) {
         <span><input id="mtotal" class="amt" type="number" min="0" value="${Math.max(total / 100, list.length)}"><small>00円</small></span>
         <button class="pill2 on" id="mapply">変更</button>
       </div>
-      <div class="note keep">合計 ${total.toLocaleString()}円・${list.length}点。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。目安オッズの合成は、出目確率から見た「これだけつけば五分」の倍率で、合成オッズの方が大きければ（緑）確率のわりに割に合う買い方です。</div>
+      <div class="note keep">合計 ${total.toLocaleString()}円・${list.length}点。期待値は「出目確率×オッズ」で、1.0より上（緑）なら得の見込み。オッズが更新されると自動で計算し直します。合成オッズは、全部の買い目を1つの賭けとみたときの倍率（払戻が揃う配分のとき）。目安オッズの合成は、出目確率から見た「これだけつけば五分」の倍率で、合成オッズの方が大きければ（緑）確率のわりに割に合う買い方です。</div>
     </div>
     ${warnBox}
     <div class="orow"><div class="seg"><button class="pill2 ${state.memoSort === "boat" ? "on" : ""}" data-ms="boat">枠番順</button><button class="pill2 ${state.memoSort === "odds" ? "on" : ""}" data-ms="odds">オッズ順</button></div>
       <span class="cnt">${od?.time ? "オッズ " + esc(od.time) : "締切時オッズ"}</span></div>
-    <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>目安オッズ<br><small>出目確率</small></th><th>購入金額</th><th>想定払戻<br>収支</th><th>購入<br><small>した印</small></th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="7" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
+    <div class="tbl"><table class="otbl memo"><thead><tr><th>組番</th><th>オッズ</th><th>目安オッズ<br><small>出目確率</small></th><th>期待値</th><th>購入金額</th><th>想定払戻<br>収支</th><th>購入<br><small>した印</small></th><th></th></tr></thead><tbody>${rows || '<tr><td colspan="8" class="cnt">オッズをタップすると、ここに入ります</td></tr>'}</tbody></table></div>
     ${list.length ? `<div style="text-align:center;margin-top:12px;display:flex;gap:8px;justify-content:center;flex-wrap:wrap"><button class="pill2" id="mbuyall">${list.every((m) => m.bought) ? "購入の印をすべて外す" : "すべて購入済みにする"}</button><button class="pill2" id="mclear">すべての買い目を削除</button></div>
     <div class="note">「購入」の印をつけた買い目は、収支タブで（ ）の中に実際に買った分として出ます。</div>` : ""}`;
   const re = () => openMemo(v, race, od);
-  $("mclose").onclick = () => { closeModal(); drawOddsTab(v, race, true); };
+  // オッズの自動更新(30秒ごと。3回に1回は最新を直接読む)。入力中・閉じた後・別のレースでは止める
+  clearTimeout(state.memoTimer);
+  const myKey = memoKey();
+  if (!race.entries.some((e) => e.place != null || e.status)) {
+    state.memoTick = (state.memoTick || 0) + 1;
+    state.memoTimer = setTimeout(async () => {
+      if ($("modal").hidden || memoKey() !== myKey || !$("mclose")) return;
+      if (document.activeElement?.tagName === "INPUT" || document.activeElement?.tagName === "SELECT") { openMemo(v, race, od); return; }
+      const hd = state.date.replace(/-/g, "");
+      const nw = state.memoTick % 3 === 0 ? await getLive(hd, state.venue, race.no) : await getLiveRaw(hd, state.venue, race.no);
+      const newer = nw && (!od?.time || (nw.time || "") >= od.time);
+      if ($("modal").hidden || memoKey() !== myKey || !$("mclose")) return;
+      openMemo(v, race, newer ? { ...od, ...nw } : od);
+    }, 30000);
+  }
+  $("mclose").onclick = () => { clearTimeout(state.memoTimer); closeModal(); drawOddsTab(v, race, true); };
   document.querySelectorAll("[data-ms]").forEach((b) => b.onclick = () => { state.memoSort = b.dataset.ms; re(); });
   $("mmode").onchange = (e) => { state.memoMode = e.target.value; };
   document.querySelectorAll("input.amt[data-k]").forEach((inp) => inp.onchange = () => {
