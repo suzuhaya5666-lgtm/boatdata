@@ -1,8 +1,8 @@
 {
- "asof": "2026年11月21日現在",
- "fetched": "2026-11-22 23:27",
+ "asof": "2026年11月22日現在",
+ "fetched": "2026-11-23 11:28",
  "source": "https://www.boatrace-grandprix.jp/2026/rtg/sp/ranking.php",
- "prev_asof": "2026年11月20日現在",
+ "prev_asof": "2026年11月21日現在",
  "prev": {
   "4320": 1,
   "5121": 2,
@@ -448,7 +448,7 @@
    "name": "稲田浩二",
    "branch": "兵庫",
    "cls": "A1",
-   "money": 55792000
+   "money": 56575000
   },
   {
    "rank": 49,
@@ -540,11 +540,11 @@
   },
   {
    "rank": 60,
-   "regno": "3716",
-   "name": "石渡鉄兵",
-   "branch": "東京",
+   "regno": "4061",
+   "name": "萩原秀人",
+   "branch": "福井",
    "cls": "A1",
-   "money": 49301000
+   "money": 49662000
   }
  ]
 }
