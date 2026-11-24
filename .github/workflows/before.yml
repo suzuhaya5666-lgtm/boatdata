@@ -8,11 +8,6 @@ on:
     - cron: "17 4 * * *"    # 13:17
     - cron: "47 9 * * *"    # 18:47
   workflow_dispatch:
-    inputs:
-      fill:
-        description: "取りこぼした日の直前情報を後から取る(YYYYMMDD)。空なら普段どおり"
-        required: false
-        default: ""
 
 permissions:
   contents: write
@@ -46,10 +41,4 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [ -n "${{ inputs.fill }}" ]; then
-            python -u scripts/before.py --fill "${{ inputs.fill }}"
-            git add data/before
-            git diff --cached --quiet || { git commit -m "直前情報(取りこぼし) ${{ inputs.fill }}"; for i in 1 2 3; do git pull --rebase -q && git push -q && break; sleep 5; done; }
-          else
-            python -u scripts/before.py --loop 330
-          fi
+          python -u scripts/before.py --loop 330

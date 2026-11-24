@@ -1,0 +1,35 @@
+name: before_fill
+
+# 取りこぼした日の直前情報を後から取る(普段の直前情報の取得とは別に動く)
+on:
+  workflow_dispatch:
+    inputs:
+      day:
+        description: "日付(YYYYMMDD)"
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: before_fill
+  cancel-in-progress: false
+
+jobs:
+  fill:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: |
+          pip install --quiet numpy
+          python -u scripts/before.py --fill "${{ inputs.day }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/before
+          git diff --cached --quiet && exit 0
+          git commit -m "直前情報(取りこぼし) ${{ inputs.day }}"
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && break; sleep 10; done
