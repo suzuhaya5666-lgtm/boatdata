@@ -32,4 +32,4 @@ jobs:
           git add data/before
           git diff --cached --quiet && exit 0
           git commit -m "直前情報(取りこぼし) ${{ inputs.day }}"
-          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && break; sleep 10; done
+          for i in 1 2 3 4 5; do git pull --rebase -X ours -q && git push -q && break; git rebase --abort 2>/dev/null; sleep 10; done

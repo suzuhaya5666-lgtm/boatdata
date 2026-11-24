@@ -364,8 +364,14 @@ def fill_day(day_s):
     with open(os.path.join(DATA, "races", day_s[:4], f"{day_s}.json"), encoding="utf-8") as f:
         races = json.load(f)
     got = 0
+    now = dt.datetime.now(JST)
     for code, v in races["venues"].items():
-        for no in v["races"]:
+        for no, race in v["races"].items():
+            # 今日のまだ終わっていないレースは、普段の取得に任せる(同じファイルを取り合わない)
+            if day == now.date() and race.get("deadline"):
+                hh, mm = map(int, race["deadline"].split(":"))
+                if now < now.replace(hour=hh, minute=mm, second=0, microsecond=0) + dt.timedelta(minutes=20):
+                    continue
             p = os.path.join(DATA, "before", day_s, f"{code}_{int(no):02d}.json")
             if not os.path.exists(p) and save_before(code, int(no), day):
                 got += 1
