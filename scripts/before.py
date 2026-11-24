@@ -177,7 +177,8 @@ def save_before(code, no, day, now=None):
     time.sleep(1)
     info = parse(html)
     if not any(e["exh"] is not None for e in info["entries"].values()):
-        print(f"{VENUES[code]}{no}R: 展示前")
+        t = re.search(r"<title>(.*?)</title>", html, re.S)
+        print(f"{VENUES[code]}{no}R: 展示前 ({len(html)}文字 {t.group(1).strip()[:30] if t else 'タイトルなし'})")
         return False
     if code in orgtenji.VENUES:  # 場独自のオリジナル展示(一周・まわり足・直線)
         org = orgtenji.fetch(code, day, no)
@@ -343,6 +344,34 @@ def near_odds():
     return True
 
 
+STALL = 0   # 締切間際なのに展示が取れない状態が続いた回数(公式サイトにこの実行環境が弾かれている時など)
+
+
+def restart_elsewhere():
+    """別の実行環境でやり直す(新しい実行を予約してから、この実行を終える)"""
+    repo = os.environ.get("GITHUB_REPOSITORY")
+    if not repo:
+        return False
+    r = subprocess.run(["gh", "api", "-X", "POST", f"repos/{repo}/actions/workflows/before.yml/dispatches", "-f", "ref=main"],
+                       capture_output=True)
+    print("展示が取れない状態が続くので、別の実行環境でやり直します", r.returncode)
+    return r.returncode == 0
+
+
+def fill_day(day_s):
+    """取りこぼした日の直前情報を後から取る(公式サイトは終わったレースの展示も見られる)"""
+    day = dt.date(int(day_s[:4]), int(day_s[4:6]), int(day_s[6:]))
+    with open(os.path.join(DATA, "races", day_s[:4], f"{day_s}.json"), encoding="utf-8") as f:
+        races = json.load(f)
+    got = 0
+    for code, v in races["venues"].items():
+        for no in v["races"]:
+            p = os.path.join(DATA, "before", day_s, f"{code}_{int(no):02d}.json")
+            if not os.path.exists(p) and save_before(code, int(no), day):
+                got += 1
+    print(f"{day_s} 取りこぼしの直前情報 {got}件")
+
+
 def fetch_once():
     """締切が近いレースの直前情報を取る。戻り値: (保存件数, 今日のまだ終わっていないレースがあるか)"""
     now = dt.datetime.now(JST)
@@ -356,6 +385,7 @@ def fetch_once():
     outdir = os.path.join(DATA, "before", f"{today:%Y%m%d}")
     got = 0
     remaining = False
+    late = []
     for code, v in day["venues"].items():
         for no, race in sorted(v["races"].items(), key=lambda x: int(x[0])):
             if not race.get("deadline"):
@@ -373,7 +403,13 @@ def fetch_once():
                         continue
             if save_before(code, int(no), today, now):
                 got += 1
+            elif now >= dl - dt.timedelta(minutes=3):   # 締切3分前を過ぎても展示が取れない(普通はありえない)
+                late.append(f"{code}_{no}")
     print(f"{now:%H:%M} 直前情報 {got}件")
+    global STALL
+    STALL = STALL + 1 if len(late) >= 2 and got == 0 else 0
+    if late:
+        print("締切間際なのに展示が取れないレース", late)
     try:
         fetch_live_odds(day, now)
     except Exception as e:  # オッズが失敗しても直前情報は続ける
@@ -432,6 +468,9 @@ def redeploy():
 
 def main():
     # --loop 分: 指定した時間まで5分ごとに取り続ける(GitHub の定期実行は遅れたり飛んだりするため)
+    if "--fill" in sys.argv:
+        fill_day(sys.argv[sys.argv.index("--fill") + 1])
+        return
     if "--loop" not in sys.argv:
         fetch_once()
         return
@@ -447,6 +486,8 @@ def main():
             remaining = True
         if not remaining:
             print("今日のレースは終わりました")
+            break
+        if STALL >= 2 and restart_elsewhere():
             break
         if time.time() - start > limit * 60:
             print("時間になったので終了(次の実行に引き継ぎ)")
