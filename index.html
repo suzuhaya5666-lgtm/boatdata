@@ -636,7 +636,7 @@ function drawList() {
 
   const now = nowJST();
   const races = Object.values(v.races).sort((a, b) => a.no - b.no);
-  const ptsBtn = isPrelimDay(v) || (v.day || 0) > 1 ? `<button class="ptsbtn" id="ptsGo">📊 節間の得点率・得点早見表</button>` : "";
+  const ptsBtn = isPrelimDay(v) || (v.day || 0) > 1 ? `<button class="ptsbtn" id="ptsGo">📊 節間 得点率ランキング</button>` : "";
   $("view-race").innerHTML = ptsBtn + races.map((r) => {
     const done = r.payouts && Object.keys(r.payouts).length;
     const closed = !done && (state.date < now.date || (state.date === now.date && r.deadline && r.deadline <= now.time));
@@ -841,7 +841,7 @@ setInterval(() => {
 function drawDetail() {
   const v = state.day.venues[state.venue];
   const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
-  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["odds", "オッズ"], ["deme", "出目確率"], ["bet", "検証買目"], ["result", "結果"], ["pts", "得点"]];
+  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["odds", "オッズ"], ["deme", "出目確率"], ["bet", "検証買目"], ["result", "結果"], ["pts", "得点率"]];
   state.dtab = state.dtab || "card";
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
@@ -1015,7 +1015,9 @@ async function drawCardTab(v, race) {
       </table></div>
       <div class="note">数値ごとに、いちばん良いものをピンク、2番目を黄色にしています（STと展示は小さいほど良い）。平均STは直近1年（フライング・出遅れを除く）、下の段はこのレースのコースでの平均STと本数。Fは今の期(11〜4月・5〜10月)のフライング数、( )は前の期のフライング数(F休みが未消化の可能性)。Lは直近1年の回数。平均STの赤字は想定ST: ふだんのコース別平均に、F持ち・前期F・初日/2日目の遅れ(平均STの帯・級別・地元・その場が久しぶりか・風速・波・天候・風向で変わる)を足した値。初日は、展示STが.40以上なら本番もさらに遅れやすいので +.01 足します（「展示遅」）。3日目以降のF持ちで、F持ち中の実績が5本以上ならその平均。今節成績はこの節のこれまでのレース（R・進入コース・ST・着順）。結果と払戻金は「結果」タブにあります。</div>
     </div>
+    <div id="ptsBox"></div>
 `;
+  fillPtsQuick(v, race);
   const dn = $("dayNav");
   if (dn) dn.onclick = () => toggleDayNav(v);
 }
@@ -2005,16 +2007,13 @@ function rankIf(sp, a, addPts) {
 }
 const f2 = (x) => x == null ? "-" : x.toFixed(2);
 
-async function drawPtsTab(v, race) {
-  loading();
-  const sp = await seriesPoints(state.date, state.venue);
-  if (state.dtab !== "pts") return;
-  const box = $("view-race");
-  if (!sp || !sp.list.length) { box.innerHTML = '<div class="empty">この節の予選の成績がまだありません。</div>'; return; }
+const ptsSeatChips = (id) => chipRow(id, [["18", "準優18人"], ["12", "12人"], ["6", "優出6人"]], String(PT.seats));
+const ptsStatus = (sp) => sp.finished ? "予選の成績（予選は終わっています）" : `${sp.day}日目まで${state.date === nowJST().date ? "（今日の分は速報を含む）" : ""}`;
+// 得点早見表(このレースの6人)。出走表の下に出す
+function ptsQuickCard(sp, race) {
   const S = PT.seats;
   const byReg = Object.fromEntries(sp.list.map((a) => [a.regno, a]));
-  const E = race.entries;
-  const cols = E.map((e) => {
+  const cols = race.entries.map((e) => {
     const a = byReg[e.regno];
     if (!a) return { e, a: null };
     // 早見表の対象 = このレースが残っていればこのレース、なければ次に残っているレース
@@ -2030,41 +2029,59 @@ async function drawPtsTab(v, race) {
     return { e, a, tgt, need, m };
   });
   const head = cols.map(({ e }) => `<th class="ptsh w${e.boat}">${e.boat}<br><small>${esc(e.regno)}</small><br>${esc((e.name || "").replace(/\s+/g, "\n")).replace("\n", "<br>")}</th>`).join("");
-  const row = (label, f, cls = "") => `<tr class="${cls}"><th class="ptsl">${label}</th>${cols.map(f).join("")}</tr>`;
+  const row = (label, f) => `<tr><th class="ptsl">${label}</th>${cols.map(f).join("")}</tr>`;
   const rankRow = row("順位", ({ a }) => `<td class="ptsb">${!a ? "-" : a.excl ? `<span class="ptx">除外</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ? `${a.rank}位` : "-"}</td>`);
   const rateRow = row("得点率", ({ a }) => `<td class="ptsb ${a && !a.excl && a.rank && a.rank <= S ? "ptr" : ""}">${a ? f2(a.rate) : "-"}<br><small class="sub">${a ? `${a.pts}点/${a.n}走` : ""}</small></td>`);
   const kRows = [1, 2, 3, 4, 5, 6].map((k) => row(`${k}着`, ({ a, tgt }) => {
     if (!a || !tgt || a.excl) return '<td class="sub">-</td>';
-    const add = PTS_TBL[tgt.kind][k - 1], x = rankIf(sp, a, add);
+    const x = rankIf(sp, a, PTS_TBL[tgt.kind][k - 1]);
     return `<td class="${x.rank <= S ? "ptin" : ""}">${f2(x.rate)}<br><small>${x.rank}位</small></td>`;
   })).join("");
   const needRow = row("必要点", ({ a, need, m }) => `<td class="ptsb">${!a || a.excl ? "-" : !m ? '<small class="sub">走了</small>' : need === "×" ? '<span class="ptx">×</span><br><small class="sub">届かない</small>' : `${need}<br><small class="sub">残${m}走</small>`}</td>`);
   const nextRow = row("対象<br>レース", ({ a, tgt }) => `<td>${!a || !tgt ? "-" : `<span class="ptnx ${tgt.date === state.date && tgt.no === race.no ? "cur" : ""}">${tgt.date !== state.date ? "明日" : ""}${tgt.no}R</span><br><small class="sub">${esc(PTS_NAME[tgt.kind])}</small>`}</td>`);
   const restRow = row("残り", ({ a }) => `<td><small>${!a || !a.rest.length ? "-" : a.rest.map((x) => `${x.date !== state.date ? "明" : ""}${x.no}R`).join("・")}</small></td>`);
+  return `<div class="card"><h2>得点早見表</h2>
+      <div class="meta"><span>${esc(ptsStatus(sp))}</span></div>
+      ${ptsSeatChips("ptseat")}
+      <div class="tbl"><table class="ptt"><thead><tr><th></th>${head}</tr></thead><tbody>
+        ${rankRow}${rateRow}${kRows}${needRow}${nextRow}${restRow}</tbody></table></div>
+      <div class="note keep">赤 = その着なら${S}位以内（他の選手が今のままの場合）。必要点 = 残りのレースの合計で、今の${S}位（自分以外）の得点率に並ぶのに要る点。他の選手も走るのでボーダーは上がることが多いです。全体の順位は「得点率」タブ。</div>
+    </div>`;
+}
+// 出走表の下: 予選中だけ早見表を出す
+async function fillPtsQuick(v, race) {
+  const sp = await seriesPoints(state.date, state.venue);
+  const box = $("ptsBox");
+  if (!box || state.dtab !== "card" || !sp || !sp.list.length || sp.finished) return;
+  box.innerHTML = ptsQuickCard(sp, race);
+  $("ptseat").querySelectorAll("button").forEach((b) => b.onclick = () => { PT.seats = Number(b.dataset.p); store.set("ptSeats", b.dataset.p); fillPtsQuick(v, race); });
+}
 
-  // 節間の順位表
-  const inRace = new Set(E.map((e) => e.regno));
+// 「得点」タブ: 節間の得点率ランキング(全選手)
+async function drawPtsTab(v, race) {
+  loading();
+  const sp = await seriesPoints(state.date, state.venue);
+  if (state.dtab !== "pts") return;
+  const box = $("view-race");
+  if (!sp || !sp.list.length) { box.innerHTML = '<div class="empty">この節の予選の成績がまだありません。</div>'; return; }
+  const S = PT.seats;
+  const inRace = new Set(race.entries.map((e) => e.regno));
+  const boatOf = Object.fromEntries(race.entries.map((e) => [e.regno, e.boat]));
   let lineDone = false;
   const trs = sp.list.map((a) => {
     let pre = "";
     if (!lineDone && (a.excl || !a.rank || a.rank > S)) { lineDone = true; pre = `<tr class="ptline"><td colspan="6">── ${S}位ボーダー ${f2(sp.list.filter((x) => !x.excl && x.n)[S - 1]?.rate ?? null)} ──</td></tr>`; }
     const seq = a.res.map((x) => `<span class="ptq ${x.mark === "1" ? "p1" : /^[FLK失欠?]/.test(x.mark) || x.mark === "出遅" ? "ptx" : ""}">${esc(x.mark === "失格" ? "失" : x.mark === "欠場" ? "欠" : x.mark === "出遅" ? "L" : x.mark)}</span>`).join("");
     return `${pre}<tr class="${inRace.has(a.regno) ? "ptme" : ""}"><td>${a.excl ? `<span class="ptx">除外</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ?? "-"}</td>
-      <td class="name">${esc(a.name)} <small>${esc(a.cls || "")}</small></td><td class="ptsb">${f2(a.rate)}</td><td><small>${a.pts}/${a.n}</small></td>
+      <td class="name">${inRace.has(a.regno) ? `<span class="waku w${boatOf[a.regno]}" style="width:20px;height:20px;line-height:18px;font-size:12px">${boatOf[a.regno]}</span> ` : ""}${esc(a.name)} <small>${esc(a.cls || "")}</small></td><td class="ptsb">${f2(a.rate)}</td><td><small>${a.pts}/${a.n}</small></td>
       <td style="text-align:left">${seq}</td><td><small>${a.rest.map((x) => `${x.date !== state.date ? "明" : ""}${x.no}R`).join("・") || "-"}</small></td></tr>`;
   }).join("");
-  const status = sp.finished ? "予選の成績（予選は終わっています）" : `${sp.day}日目まで（今日の分は速報を含む）`;
   box.innerHTML = `
-    <div class="card"><h2>得点早見表</h2>
-      <div class="meta"><span>${esc(status)}</span></div>
-      ${chipRow("ptseat", [["18", "準優18人"], ["12", "12人"], ["6", "優出6人"]], String(S))}
-      <div class="tbl"><table class="ptt"><thead><tr><th></th>${head}</tr></thead><tbody>
-        ${rankRow}${rateRow}${kRows}${needRow}${nextRow}${restRow}</tbody></table></div>
-      <div class="note keep">赤 = その着なら${S}位以内（他の選手が今のままの場合）。必要得点 = 残りのレースの合計で、今の${S}位（自分以外）の得点率に並ぶのに要る点。他の選手も走るのでボーダーは上がることが多いです。</div>
-    </div>
-    <div class="card"><h2>節間 得点率順位</h2>
+    <div class="card"><h2>節間 得点率ランキング</h2>
+      <div class="meta"><span>${esc(ptsStatus(sp))}</span><span>${sp.list.length}人</span></div>
+      ${ptsSeatChips("ptseat")}
       <div class="tbl"><table class="ptl"><thead><tr><th>順位</th><th>選手</th><th>得点率</th><th>点/走</th><th>今節成績</th><th>残り</th></tr></thead><tbody>${trs}</tbody></table></div>
-      <div class="note keep">色付きの行はこのレースの選手。同率は 得点の合計 → 1着の数 → 2着の数 の順に並べています（公式の決め方と違うことがあります）。</div>
+      <div class="note keep">色付きの行は${race.no}Rの選手（枠番つき）。同率は 得点の合計 → 1着の数 → 2着の数 の順に並べています（公式の決め方と違うことがあります）。</div>
     </div>
     <div class="card"><h2>配点（この表の計算）</h2>
       <div class="tbl"><table><thead><tr><th>種別</th>${[1, 2, 3, 4, 5, 6].map((k) => `<th>${k}着</th>`).join("")}</tr></thead><tbody>
