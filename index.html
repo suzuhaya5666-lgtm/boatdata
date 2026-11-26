@@ -121,6 +121,19 @@
   .race .acts { border-top: 1px solid var(--line); padding: 10px 14px; }
   .race .acts button { width: 100%; border: 1.5px solid #1d2733; border-radius: 999px; padding: 10px; font-weight: 700; }
 
+  /* ---- 得点早見表 */
+  table.ptt { table-layout: fixed; } table.ptt td, table.ptt th { padding: 5px 1px; font-size: 13px; white-space: normal; line-height: 1.25; }
+  table.ptt small { font-size: 10px; }
+  table.ptt th.ptsl { width: 15%; background: #6c7fd8; color: #fff; font-weight: 700; font-size: 13px; }
+  th.ptsh { font-size: 12px; font-weight: 700; line-height: 1.3; } th.ptsh small { font-size: 11px; opacity: .85; }
+  th.ptsh.w1 { color: #000; } th.ptsh.w5 { color: #000; }
+  td.ptsb { font-weight: 800; font-size: 15px !important; } td.ptr { color: #e03131; }
+  td.ptin { background: #e8777a; color: #fff; font-weight: 700; } td.ptin small { color: #fff; }
+  .ptx { color: #c92a2a; font-weight: 700; } .ptnx { display: inline-block; border: 2px solid #1971c2; border-radius: 4px; padding: 0 4px; font-weight: 800; }
+  .ptnx.cur { background: #e03131; border-color: #e03131; color: #fff; }
+  tr.ptme td { background: #fff4e6; } tr.ptline td { color: #e03131; font-weight: 800; font-size: 12px; background: #fff5f5; }
+  .ptq { display: inline-block; min-width: 1.2em; text-align: center; font-size: 13px; }
+  .ptsbtn { margin: 0 0 12px; width: 100%; border: 1.5px solid var(--accent); color: var(--accent); border-radius: 999px; padding: 9px; font-weight: 700; background: #fff; }
   /* ---- 詳細 */
   .tbl { width: 100%; overflow-x: auto; margin-top: 10px; }
   table { border-collapse: collapse; width: 100%; font-size: 14px; white-space: nowrap; }
@@ -623,7 +636,8 @@ function drawList() {
 
   const now = nowJST();
   const races = Object.values(v.races).sort((a, b) => a.no - b.no);
-  $("view-race").innerHTML = races.map((r) => {
+  const ptsBtn = isPrelimDay(v) || (v.day || 0) > 1 ? `<button class="ptsbtn" id="ptsGo">📊 節間の得点率・得点早見表</button>` : "";
+  $("view-race").innerHTML = ptsBtn + races.map((r) => {
     const done = r.payouts && Object.keys(r.payouts).length;
     const closed = !done && (state.date < now.date || (state.date === now.date && r.deadline && r.deadline <= now.time));
     const badge = done ? '<span class="badge">結果確定</span>' : closed ? '<span class="badge wait">締切</span>' : "";
@@ -648,6 +662,10 @@ function drawList() {
   }).join("");
   $("view-race").querySelectorAll("button[data-r]").forEach((b) =>
     b.addEventListener("click", () => go("detail", { race: Number(b.dataset.r) })));
+  if ($("ptsGo")) $("ptsGo").onclick = () => {
+    const nx = races.find((r) => !(r.payouts && Object.keys(r.payouts).length) && (state.date > now.date || (state.date === now.date && r.deadline > now.time)));
+    state.dtab = "pts"; go("detail", { race: (nx || races[races.length - 1]).no });
+  };
   fillAre(races);
 }
 
@@ -823,7 +841,7 @@ setInterval(() => {
 function drawDetail() {
   const v = state.day.venues[state.venue];
   const nos = Object.keys(v.races).map(Number).sort((a, b) => a - b);
-  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["odds", "オッズ"], ["deme", "出目確率"], ["bet", "検証買目"], ["result", "結果"]];
+  const tabs = [["card", "出走表"], ["racer", "選手成績"], ["exh", "展示"], ["motor", "モーター"], ["odds", "オッズ"], ["deme", "出目確率"], ["bet", "検証買目"], ["result", "結果"], ["pts", "得点"]];
   state.dtab = state.dtab || "card";
   $("barIn").innerHTML = `
     <button class="back" id="back">‹ ${esc(v.name)}の一覧</button>
@@ -843,6 +861,7 @@ function drawDetail() {
   if (state.dtab === "result") return drawResultTab(v, race);
   if (state.dtab === "odds") return drawOddsTab(v, race);
   if (state.dtab === "bet") return drawBetTab(v, race);
+  if (state.dtab === "pts") return drawPtsTab(v, race);
   drawCardTab(v, race);
 }
 
@@ -1871,6 +1890,188 @@ function gradeOpts(female) {
 state.g = "all";
 function chipRow(id, opts, cur) {
   return `<div class="seg" id="${id}">${opts.map(([k, l]) => `<button data-p="${k}" class="pill2 ${k === cur ? "on" : ""}">${l}</button>`).join("")}</div>`;
+}
+
+// ---------------------------------------------------------------- 節間の得点率(予選)
+// その節の初日から、準優勝戦・優勝戦がない日(=予選の日)のレースを足し上げる。今日の分は速報結果(data/live)も使う。
+// 配点は既定の表(場・節で違うことがある)。事故: F・L1・失格(S1・S2)は賞典除外、K1は0点で1走、K0・L0(責任外)は数えない
+// 過去の準優勝戦(3個・18人)の顔ぶれと照らすと、この決め方が一番よく合った(361節で約93%)
+const PTS_TBL = { std: [10, 8, 6, 4, 2, 1], toku: [12, 10, 8, 6, 4, 3], dream: [12, 10, 9, 7, 6, 5] };
+const PTS_NAME = { std: "予選", toku: "特選・特賞・選抜・A戦", dream: "ドリーム" };
+const PT = { seats: Number(store.get("ptSeats")) || 18 };
+function ptsKind(name) {
+  if (/ドリーム/.test(name || "")) return "dream";
+  if (/特選|特賞|選抜|特別A|A戦/.test(name || "")) return "toku";
+  return "std";
+}
+const addDay = (date, k) => { const d = new Date(date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); };
+const dayPath = (date) => `data/races/${date.slice(0, 4)}/${date.replace(/-/g, "")}.json`;
+// 今日・昨日・明日の分はサイトの公開を待たずリポジトリから直接読む
+async function dayFile(date) {
+  const p = dayPath(date), today = nowJST().date;
+  if (date < addDay(today, -1) || date > addDay(today, 1)) return cached(p);
+  const key = "raw:" + p;
+  if (!(key in cache) || Date.now() - (cache[key + ":t"] || 0) > 60000) {
+    cache[key + ":t"] = Date.now();
+    cache[key] = fetch(RAW + p, { cache: "no-store" }).then((r) => (r.ok ? r.json() : getJSON(p))).catch(() => getJSON(p).catch(() => null));
+  }
+  return cache[key];
+}
+const isPrelimDay = (v) => !Object.values(v.races).some((r) => /優勝戦/.test(r.name || ""));
+// 予選の日に「予選」の名前のレースがあれば、「一般」で始まるレースは予選外とみなす
+function prelimRaces(v) {
+  const rs = Object.values(v.races).sort((a, b) => a.no - b.no);
+  const hasY = rs.some((r) => /予選/.test(r.name || ""));
+  return rs.filter((r) => !(hasY && /^一般/.test(r.name || "")));
+}
+// 1レースの着順 {regno: {place, status}}。確定データ → 速報(data/live) の順。まだなら null
+async function raceOutcome(date, code, r) {
+  if (r.entries.some((e) => e.place || e.status)) {
+    const o = {}; r.entries.forEach((e) => { o[e.regno] = { place: e.place || null, status: e.status || null }; }); return o;
+  }
+  const now = nowJST();
+  if (date > now.date || (date === now.date && r.deadline && r.deadline > now.time)) return null;
+  if (date < addDay(now.date, -3)) return null;
+  const lr = await liveRes(date, code, r.no);
+  if (!lr?.places?.length) return null;
+  const o = {};
+  r.entries.forEach((e) => { o[e.regno] = { place: null, status: "?" }; });  // 速報で着順がない艇 = 事故・欠場(詳細は確定待ち)
+  lr.places.forEach((p) => { o[p.regno] = { place: p.place, status: null }; });
+  return o;
+}
+async function seriesPoints(date, code) {
+  const ck = `pts:${date}:${code}`;
+  if (cache[ck] && Date.now() - cache[ck].t < 60000) return cache[ck].p;
+  const p = (async () => {
+    const d0 = await dayFile(date);
+    const v0 = d0?.venues?.[code];
+    if (!v0) return null;
+    const days = [];  // [{date, v}] 古い順
+    const n0 = v0.day || 1;
+    for (let k = n0 - 1; k >= 1; k--) {
+      const dd = addDay(date, -k);
+      const f = await dayFile(dd);
+      const v = f?.venues?.[code];
+      if (v && (!v0.title || v.title === v0.title)) days.push({ date: dd, v });
+    }
+    days.push({ date, v: v0 });
+    // 明日が予選の日なら、明日の出走予定も足す(番組が出ていれば)
+    if (!v0.final) {
+      const nd = addDay(date, 1), f = await dayFile(nd), v = f?.venues?.[code];
+      if (v && v.title === v0.title && (v.day || 0) === n0 + 1) days.push({ date: nd, v, future: true });
+    }
+    const R = {};
+    const racer = (e) => (R[e.regno] ||= { regno: e.regno, name: e.name, cls: e.class, branch: e.branch, pts: 0, n: 0, w: [0, 0, 0, 0, 0, 0, 0], res: [], rest: [], excl: false });
+    const prelim = days.filter((x) => isPrelimDay(x.v));
+    const outs = await Promise.all(prelim.map((x) => Promise.all(prelimRaces(x.v).map((r) => x.future ? null : raceOutcome(x.date, code, r)))));
+    prelim.forEach((x, i) => prelimRaces(x.v).forEach((r, j) => {
+      const kind = ptsKind(r.name), o = outs[i][j];
+      r.entries.forEach((e) => {
+        if (!e.regno) return;
+        const a = racer(e);
+        if (!o) { a.rest.push({ date: x.date, no: r.no, boat: e.boat, kind, name: r.name }); return; }
+        const s = o[e.regno] || { place: null, status: "?" };
+        const st = s.status || "";
+        let p = 0, count = true, mark = s.place ? String(s.place) : statusText(st) || "?";
+        if (s.place) { p = PTS_TBL[kind][s.place - 1] || 0; a.w[s.place]++; }
+        else if (/^(F|L1|S1|S2)$/.test(st)) { a.excl = true; a.exclWhy = st === "F" ? "F" : st === "L1" ? "出遅" : "失格"; mark = st === "F" ? "F" : st === "L1" ? "L" : "失"; }
+        else if (/^(K0|L0)$/.test(st)) count = false;
+        if (count) { a.pts += p; a.n++; }
+        a.res.push({ date: x.date, no: r.no, kind, mark, p, count });
+      });
+    }));
+    const list = Object.values(R).filter((a) => a.n || a.rest.length);
+    list.forEach((a) => { a.rate = a.n ? a.pts / a.n : null; });
+    const cmp = (a, b) => (b.excl ? 0 : 1) - (a.excl ? 0 : 1) || (b.n ? 1 : 0) - (a.n ? 1 : 0)
+      || (b.rate ?? 0) - (a.rate ?? 0) || b.pts - a.pts || b.w[1] - a.w[1] || b.w[2] - a.w[2];
+    list.sort(cmp);
+    list.forEach((a, i) => { a.rank = a.excl || !a.n ? null : i + 1; });
+    const restAny = list.some((a) => a.rest.length);
+    return { list, finished: !restAny, day: n0 };
+  })();
+  cache[ck] = { t: Date.now(), p };
+  return p;
+}
+// a 以外の選手の中で seats 番目の得点率(ボーダー)
+function borderOthers(sp, a, seats) {
+  const o = sp.list.filter((x) => x !== a && !x.excl && x.n);
+  return o.length >= seats ? o[seats - 1].rate : 0;
+}
+// a が次のレースで k 着なら、今の他の選手の中で何位か
+function rankIf(sp, a, addPts) {
+  const r = (a.pts + addPts) / (a.n + 1);
+  const above = sp.list.filter((x) => x !== a && !x.excl && x.n && (x.rate > r + 1e-9 || (Math.abs(x.rate - r) < 1e-9 && x.pts > a.pts + addPts))).length;
+  return { rate: r, rank: above + 1 };
+}
+const f2 = (x) => x == null ? "-" : x.toFixed(2);
+
+async function drawPtsTab(v, race) {
+  loading();
+  const sp = await seriesPoints(state.date, state.venue);
+  if (state.dtab !== "pts") return;
+  const box = $("view-race");
+  if (!sp || !sp.list.length) { box.innerHTML = '<div class="empty">この節の予選の成績がまだありません。</div>'; return; }
+  const S = PT.seats;
+  const byReg = Object.fromEntries(sp.list.map((a) => [a.regno, a]));
+  const E = race.entries;
+  const cols = E.map((e) => {
+    const a = byReg[e.regno];
+    if (!a) return { e, a: null };
+    // 早見表の対象 = このレースが残っていればこのレース、なければ次に残っているレース
+    const tgt = a.rest.find((x) => x.date === state.date && x.no === race.no) || a.rest[0] || null;
+    const m = a.rest.length;
+    let need = null;
+    if (!a.excl && m) {
+      const b = borderOthers(sp, a, S);
+      const restMax = a.rest.reduce((s, x) => s + PTS_TBL[x.kind][0], 0);
+      need = Math.max(0, Math.ceil(b * (a.n + m) - a.pts - 1e-9));
+      if (need > restMax) need = "×";
+    }
+    return { e, a, tgt, need, m };
+  });
+  const head = cols.map(({ e }) => `<th class="ptsh w${e.boat}">${e.boat}<br><small>${esc(e.regno)}</small><br>${esc((e.name || "").replace(/\s+/g, "\n")).replace("\n", "<br>")}</th>`).join("");
+  const row = (label, f, cls = "") => `<tr class="${cls}"><th class="ptsl">${label}</th>${cols.map(f).join("")}</tr>`;
+  const rankRow = row("順位", ({ a }) => `<td class="ptsb">${!a ? "-" : a.excl ? `<span class="ptx">除外</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ? `${a.rank}位` : "-"}</td>`);
+  const rateRow = row("得点率", ({ a }) => `<td class="ptsb ${a && !a.excl && a.rank && a.rank <= S ? "ptr" : ""}">${a ? f2(a.rate) : "-"}<br><small class="sub">${a ? `${a.pts}点/${a.n}走` : ""}</small></td>`);
+  const kRows = [1, 2, 3, 4, 5, 6].map((k) => row(`${k}着`, ({ a, tgt }) => {
+    if (!a || !tgt || a.excl) return '<td class="sub">-</td>';
+    const add = PTS_TBL[tgt.kind][k - 1], x = rankIf(sp, a, add);
+    return `<td class="${x.rank <= S ? "ptin" : ""}">${f2(x.rate)}<br><small>${x.rank}位</small></td>`;
+  })).join("");
+  const needRow = row("必要点", ({ a, need, m }) => `<td class="ptsb">${!a || a.excl ? "-" : !m ? '<small class="sub">走了</small>' : need === "×" ? '<span class="ptx">×</span><br><small class="sub">届かない</small>' : `${need}<br><small class="sub">残${m}走</small>`}</td>`);
+  const nextRow = row("対象<br>レース", ({ a, tgt }) => `<td>${!a || !tgt ? "-" : `<span class="ptnx ${tgt.date === state.date && tgt.no === race.no ? "cur" : ""}">${tgt.date !== state.date ? "明日" : ""}${tgt.no}R</span><br><small class="sub">${esc(PTS_NAME[tgt.kind])}</small>`}</td>`);
+  const restRow = row("残り", ({ a }) => `<td><small>${!a || !a.rest.length ? "-" : a.rest.map((x) => `${x.date !== state.date ? "明" : ""}${x.no}R`).join("・")}</small></td>`);
+
+  // 節間の順位表
+  const inRace = new Set(E.map((e) => e.regno));
+  let lineDone = false;
+  const trs = sp.list.map((a) => {
+    let pre = "";
+    if (!lineDone && (a.excl || !a.rank || a.rank > S)) { lineDone = true; pre = `<tr class="ptline"><td colspan="6">── ${S}位ボーダー ${f2(sp.list.filter((x) => !x.excl && x.n)[S - 1]?.rate ?? null)} ──</td></tr>`; }
+    const seq = a.res.map((x) => `<span class="ptq ${x.mark === "1" ? "p1" : /^[FLK失欠?]/.test(x.mark) || x.mark === "出遅" ? "ptx" : ""}">${esc(x.mark === "失格" ? "失" : x.mark === "欠場" ? "欠" : x.mark === "出遅" ? "L" : x.mark)}</span>`).join("");
+    return `${pre}<tr class="${inRace.has(a.regno) ? "ptme" : ""}"><td>${a.excl ? `<span class="ptx">除外</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ?? "-"}</td>
+      <td class="name">${esc(a.name)} <small>${esc(a.cls || "")}</small></td><td class="ptsb">${f2(a.rate)}</td><td><small>${a.pts}/${a.n}</small></td>
+      <td style="text-align:left">${seq}</td><td><small>${a.rest.map((x) => `${x.date !== state.date ? "明" : ""}${x.no}R`).join("・") || "-"}</small></td></tr>`;
+  }).join("");
+  const status = sp.finished ? "予選の成績（予選は終わっています）" : `${sp.day}日目まで（今日の分は速報を含む）`;
+  box.innerHTML = `
+    <div class="card"><h2>得点早見表</h2>
+      <div class="meta"><span>${esc(status)}</span></div>
+      ${chipRow("ptseat", [["18", "準優18人"], ["12", "12人"], ["6", "優出6人"]], String(S))}
+      <div class="tbl"><table class="ptt"><thead><tr><th></th>${head}</tr></thead><tbody>
+        ${rankRow}${rateRow}${kRows}${needRow}${nextRow}${restRow}</tbody></table></div>
+      <div class="note keep">赤 = その着なら${S}位以内（他の選手が今のままの場合）。必要得点 = 残りのレースの合計で、今の${S}位（自分以外）の得点率に並ぶのに要る点。他の選手も走るのでボーダーは上がることが多いです。</div>
+    </div>
+    <div class="card"><h2>節間 得点率順位</h2>
+      <div class="tbl"><table class="ptl"><thead><tr><th>順位</th><th>選手</th><th>得点率</th><th>点/走</th><th>今節成績</th><th>残り</th></tr></thead><tbody>${trs}</tbody></table></div>
+      <div class="note keep">色付きの行はこのレースの選手。同率は 得点の合計 → 1着の数 → 2着の数 の順に並べています（公式の決め方と違うことがあります）。</div>
+    </div>
+    <div class="card"><h2>配点（この表の計算）</h2>
+      <div class="tbl"><table><thead><tr><th>種別</th>${[1, 2, 3, 4, 5, 6].map((k) => `<th>${k}着</th>`).join("")}</tr></thead><tbody>
+        ${Object.keys(PTS_TBL).map((k) => `<tr><td>${PTS_NAME[k]}</td>${PTS_TBL[k].map((p) => `<td>${p}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
+      <div class="note keep">レース名で分けています（「ドリーム」→ドリーム、「特選・特賞・選抜・特別A・A戦」→特選、それ以外→予選）。予選の日に「予選」の名前のレースがある時は「一般」で始まるレースは数えません。F・L（選手責任）・失格は賞典除外、選手責任の欠場は0点で1走、責任外の欠場・出遅れは数えません。過去361節の準優勝戦（18人）の顔ぶれと照らして約93%一致（ずれはボーダー付近の同率・僅差が中心）。配点や事故の扱いは場・節で違うことがあるので、公式の得点率と少しずれることがあります。</div>
+    </div>`;
+  $("ptseat").querySelectorAll("button").forEach((b) => b.onclick = () => { PT.seats = Number(b.dataset.p); store.set("ptSeats", b.dataset.p); drawPtsTab(v, race); });
 }
 
 // ---------------------------------------------------------------- 選手成績
