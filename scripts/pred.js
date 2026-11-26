@@ -13,6 +13,7 @@ const J = (p) => { try { return JSON.parse(fs.readFileSync(path.join(ROOT, p), "
 const html = fs.readFileSync(path.join(ROOT, "index.html"), "utf8");
 function pick(name) {
   let i = html.indexOf(`\nfunction ${name}(`);
+  if (i < 0) i = html.indexOf(`\nasync function ${name}(`);
   if (i < 0) i = html.indexOf(`\nconst ${name} =`);
   if (i < 0) throw new Error(`index.html に ${name} がない`);
   const start = i + 1, first = html.slice(start, html.indexOf("\n", start)).trimEnd();
@@ -20,10 +21,19 @@ function pick(name) {
   const e = html.indexOf("\n}", start);
   return html.slice(start, html.indexOf("\n", e + 1));
 }
-const NAMES = ["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "defaultMask", "raceKind", "biasFor", "demeTri", "ARE", "WIND", "areWind", "areOf"];
+const NAMES = ["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "defaultMask", "raceKind", "biasFor", "demeTri", "ARE", "WIND", "areWind", "areOf",
+  // 勝負駆けの補正(節間の得点率から条件を出す)
+  "PTS_TBL", "ptsKind", "addDay", "dayPath", "isPrelimDay", "prelimRaces", "raceOutcome", "seriesPoints", "borderOthers", "statusText",
+  "KAKE_ADJ", "kakeTri", "kakeLabels", "kakeByCourse", "isPrelimFinal", "kakeConds"];
 const src = NAMES.map(pick).join("\n");
 var state = {};
 eval(src.replace(/^const /gm, "var "));
+// 画面の読み込み関数の代わり(ローカルのファイルを読む)
+var cache = {};
+var cached = async (p) => J(p);
+var dayFile = async (d) => J(dayPath(d));
+var liveRes = async (d, code, no) => J(`data/live/${d.replace(/-/g, "")}/${code}_${String(no).padStart(2, "0")}_res.json`);
+var nowJST = () => { const x = new Date(Date.now() + 9 * 3600 * 1000).toISOString(); return { date: x.slice(0, 10), time: x.slice(11, 16) }; };
 
 const day = process.argv[2];
 const codes = process.argv.slice(3).length ? process.argv.slice(3) : ["07"];
@@ -178,13 +188,14 @@ function f2of(adj, order, od, code, lean = 1) {
   return { f2: top, f2ex: ok2 && best && best.ev >= 1.3 ? [best] : null, f2x: f2x?.length ? f2x : null, f3x: f3x?.length ? f3x : null, p3h: packP(P3) };
 }
 
-function predict(code, race, bi, od) {
+function predict(code, race, bi, od, kake) {
   const racers = Object.fromEntries(race.entries.map((e) => [e.boat, J(`data/stats/racers/${e.regno}.json`)]));
   const ents = Object.fromEntries(race.entries.map((e) => [e.boat, e]));
   let order = [0, 1, 2, 3, 4, 5, 6];
   if (bi?.start?.length === 6) order = [0, ...bi.start.map((s) => s.boat)];
   const adj = demeAdjust(demeQ(order, racers, vs.venues[code].all, model), order, ents, racers, bi, model, { ...race, _v: code });
-  const tri = demeTri(adj.q).map((t) => ({ k: t.c.map((c) => order[c]).join("-"), p: t.p }));
+  const kc = kakeByCourse(kake, order);   // 勝負駆けの補正(画面の出目確率と同じ)
+  const tri = kakeTri(demeTri(adj.q), kc).map((t) => ({ k: t.c.map((c) => order[c]).join("-"), p: t.p }));
   const ex = {}; tri.forEach((t) => { const k = t.k.split("-").slice(0, 2).join("-"); ex[k] = (ex[k] || 0) + t.p; });
   const exs = Object.entries(ex).sort((a, b) => b[1] - a[1]);
   const o3 = od?.["3t"] || {}, o2 = od?.["2t"] || {};
@@ -196,6 +207,7 @@ function predict(code, race, bi, od) {
   const fav = hasOdds ? Math.min(...Object.values(o3).filter((x) => x > 0)) : null;
   return {
     time: now, exh: !!bi?.start?.length, odds: od?.time || null, order: order.slice(1).join(""), used: adj.used,
+    ...(Object.keys(kake || {}).length ? { kake, kakeAdj: kakeLabels(kc) } : {}),
     nige: r4(win[String(order[1])] || 0), win: Object.fromEntries(Object.entries(win).map(([b, p]) => [b, r4(p)])),
     top10: r4(a?.s ?? 0), are: a?.label || null, fav,
     split: fav != null && fav >= SPLIT, combo: fav != null && fav >= SPLIT && ["07", "19"].includes(code) && a && a.lvl >= 2,
@@ -222,6 +234,7 @@ function predict(code, race, bi, od) {
   };
 }
 
+(async () => {
 for (const code of codes) {
   const v = dayData.venues?.[code];
   if (!v) continue;
@@ -235,11 +248,12 @@ for (const code of codes) {
     // 節間のまとめ(節間成績・節間平均の展示)。画面の withSeries と同じ
     const sm = J("data/model/series.json")?.[code], sr = J(`data/series/${day}/${code}.json`);
     const withS = (b) => (sr?.racers ? { ...(b || {}), series: sr, seriesModel: sm } : b);
-    if (!slot.pre) { slot.pre = predict(code, race, withS(null), null); changed = true; }
+    const kake = !slot.pre || !closed ? await kakeConds(date, code, race) : {};
+    if (!slot.pre) { slot.pre = predict(code, race, withS(null), null, kake); changed = true; }
     if (!closed || !slot.post) {
       const bi = J(`data/before/${day}/${code}_${no}.json`);
       if (bi?.start?.length === 6 && !closed) {
-        slot.post = predict(code, race, withS(bi), J(`data/live/${day}/${code}_${no}.json`));
+        slot.post = predict(code, race, withS(bi), J(`data/live/${day}/${code}_${no}.json`), kake);
         changed = true;
       }
     }
@@ -250,3 +264,4 @@ for (const code of codes) {
   }
   console.log(`予想 ${code} ${changed ? "保存" : "変更なし"}`);
 }
+})();

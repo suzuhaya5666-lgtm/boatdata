@@ -1995,6 +1995,63 @@ async function seriesPoints(date, code) {
   cache[ck] = { t: Date.now(), p };
   return p;
 }
+// ---------------------------------------------------------------- 勝負駆けの補正(予選最終日・その選手の最後の予選レース)
+// 「何着以内なら18位以内か」(他の選手は今のまま)で、出目確率の3連単に倍率をかけて足し直す。
+// 2023/11〜2025/10 で倍率を決め、2025/10〜2026/11(決めるのに使っていない期間)でも当たりやすくなるのを確かめた
+//   1コースで2着以内が必要: 1着の目 ×1.3(逃げが予想より約6pt多い)
+//   2コースで2着以内・3着以内が必要: 1着の目 ×0.9、2着の目 ×1.3(1着より確実な2着を取りに来る)
+const KAKE_ADJ = [{ c: 1, cats: [2], a: 1.3, b: 1.0, label: "1コース2着以内条件（1着↑）" }, { c: 2, cats: [2, 3], a: 0.9, b: 1.3, label: "2コース2・3着以内条件（1着↓・2着↑）" }];
+// conds: {コース: 条件(何着以内)}。tri: [{c: [1着, 2着, 3着のコース], p}]
+function kakeTri(tri, conds) {
+  const rules = KAKE_ADJ.filter((r) => r.cats.includes(conds?.[r.c]));
+  if (!rules.length) return tri;
+  const out = tri.map((t) => {
+    let p = t.p;
+    for (const r of rules) { if (t.c[0] === r.c) p *= r.a; if (t.c[1] === r.c) p *= r.b; }
+    return { ...t, p };
+  });
+  const s = out.reduce((x, y) => x + y.p, 0);
+  out.forEach((o) => { o.p /= s; });
+  return out.sort((x, y) => y.p - x.p);
+}
+const kakeLabels = (conds) => KAKE_ADJ.filter((r) => r.cats.includes(conds?.[r.c])).map((r) => r.label);
+// 艇番ごとの条件 → コースごと
+function kakeByCourse(byBoat, order) {
+  const out = {};
+  for (const [b, k] of Object.entries(byBoat || {})) { const c = order.indexOf(Number(b)); if (c > 0) out[c] = k; }
+  return out;
+}
+// 予選最終日か: 翌日の番組に準優勝戦がある / 番組がまだなら月間日程で「4日以上の節の最終日の2日前」(過去の準優の前日と99%一致)
+async function isPrelimFinal(date, code) {
+  const nf = await dayFile(addDay(date, 1)), nv = nf?.venues?.[code];
+  if (nv) return Object.values(nv.races).some((r) => /準優勝戦/.test(r.name || ""));
+  const ym = (d) => d.slice(0, 7).replace("-", "");
+  const [g1, g2] = await Promise.all([cached(`data/grades/${ym(date)}.json`), cached(`data/grades/${ym(addDay(date, 3))}.json`)]);
+  const g = { ...(g1?.[code] || {}), ...(g2?.[code] || {}) };
+  const t = g[date]?.title;
+  if (!t) return false;
+  let s = date, e = date;
+  while (g[addDay(s, -1)]?.title === t) s = addDay(s, -1);
+  while (g[addDay(e, 1)]?.title === t) e = addDay(e, 1);
+  return (Date.parse(e) - Date.parse(s)) / 864e5 + 1 >= 4 && date === addDay(e, -2);
+}
+// このレースが「その選手の今節最後の予選レース」で、まだ走っていない選手の条件 {艇番: 何着以内}。0着(届かない)は入れない
+async function kakeConds(date, code, race) {
+  try {
+    if (!(await isPrelimFinal(date, code))) return {};
+    const sp = await seriesPoints(date, code);
+    if (!sp) return {};
+    const byReg = Object.fromEntries(sp.list.map((a) => [a.regno, a]));
+    const P = PTS_TBL[ptsKind(race.name)], out = {};
+    race.entries.forEach((e) => {
+      const a = byReg[e.regno];
+      if (!a || a.excl || a.rest.length !== 1 || a.rest[0].date !== date || a.rest[0].no !== race.no) return;
+      const b = borderOthers(sp, a, 18);
+      for (let k = 6; k >= 1; k--) if ((a.pts + P[k - 1]) / (a.n + 1) >= b - 1e-9) { out[e.boat] = k; break; }
+    });
+    return out;
+  } catch (e) { return {}; }
+}
 // a 以外の選手の中で seats 番目の得点率(ボーダー)
 function borderOthers(sp, a, seats) {
   const o = sp.list.filter((x) => x !== a && !x.excl && x.n);
@@ -2675,7 +2732,9 @@ async function computeDeme(race, lean) {
   if (bi?.start?.length === 6) base = [0, ...bi.start.map((s) => s.boat)];
   const order = state.orders?.[`${state.date}_${vc}_${race.no}`] || base;
   const adj = demeAdjust(demeQ(order, racers, vs.venues[vc].all, model), order, ents, racers, bi, model, race);
-  const tri = demeTri(adj.q, model, lean ?? leanOf()).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
+  // 勝負駆けの補正(荒れアラートは補正なしで作った境目なので lean=0 のときはかけない)
+  const kc = lean === 0 || lean === "0" ? {} : kakeByCourse(await kakeConds(state.date, vc, race), order);
+  const tri = kakeTri(demeTri(adj.q, model, lean ?? leanOf()), kc).map((t) => ({ b: t.c.map((c) => order[c]), p: t.p }));
   const prob = {};  // 券種 -> {組番: 確率}
   const add = (bet, k, p) => { (prob[bet] = prob[bet] || {})[k] = (prob[bet][k] || 0) + p; };
   tri.forEach(({ b, p }) => {
@@ -2729,7 +2788,11 @@ async function drawDemeTab(v, race, keepPos) {
   const cut = new Set(state.cuts[key] || []);
   const lean = leanOf();
   const triBase = lean === "0" ? null : demeTri(q);  // 荒れアラートは補正なしで
-  const triAll = demeTri(q, model, lean);
+  const kakeC = kakeByCourse(await kakeConds(state.date, state.venue, race), order);
+  if (state.dtab !== "deme") return;
+  const kakeL = kakeLabels(kakeC);
+  if (kakeL.length) adj.used.push("勝負駆け");
+  const triAll = kakeTri(demeTri(q, model, lean), kakeC);
   // 逃げ率を締切前のオッズと比べる。オッズ40%未満なのに予想が8pt以上高いときは、実際はオッズとほぼ同じだった(過去445レースで予想42%・オッズ29%・実際29%)
   let nigeCard = "";
   try {
@@ -2848,6 +2911,7 @@ async function drawDemeTab(v, race, keepPos) {
     <div class="card">
       <h2>各艇の着順確率</h2>
       <div class="meta"><span>${hasExh ? "展示タイム込み" : adj.used.includes("節間平均の展示・オリ展") ? "展示前（節間平均の展示・オリ展で補正）" : "展示タイムなし（展示前）"}</span><span>材料: コース別成績・${adj.used.join("・")}</span></div>
+      ${kakeL.length ? `<div class="note keep">🔥 勝負駆けの補正: ${esc(kakeL.join("、"))}（予選最終日・この選手の最後の予選レース）</div>` : ""}
       <div class="tbl"><table class="cmp"><thead><tr><th>コース</th><th>枠</th><th>選手</th><th>1着</th><th>2着</th><th>3着</th><th>2連対</th><th>3連対</th></tr></thead>
         <tbody>${rows}</tbody></table></div>
     </div>
