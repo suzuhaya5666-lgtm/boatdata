@@ -1,0 +1,41 @@
+name: pointrank
+
+# 公式の得点率一覧(予選の得点・減点・備考)を取る。data/pointrank/YYYY/YYYYMMDD.json
+on:
+  workflow_dispatch:
+    inputs:
+      start:
+        description: "開始日 YYYYMMDD(空なら2日前)"
+        default: ""
+      end:
+        description: "終了日 YYYYMMDD(空なら今日)"
+        default: ""
+      semi_only:
+        description: "準優勝戦の日だけ"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pointrank
+  cancel-in-progress: false
+
+jobs:
+  pointrank:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -u scripts/pointrank.py --start "${{ inputs.start }}" --end "${{ inputs.end }}" ${{ inputs.semi_only && '--semi-only' || '' }}
+      - name: 保存
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/pointrank
+          git commit -m "得点率一覧 $(TZ=Asia/Tokyo date '+%Y-%m-%d %H:%M')" || exit 0
+          for i in 1 2 3 4 5; do git pull --rebase -q && git push -q && break; sleep 10; done
