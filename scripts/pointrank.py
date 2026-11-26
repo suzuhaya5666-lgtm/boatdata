@@ -3,7 +3,7 @@
 
   python scripts/pointrank.py --start 20231101 --end 20261126 [--semi-only]
 
-data/races の番組を見て、予選の日と準優勝戦の日(=予選の最終成績)の場を取る。--semi-only は準優勝戦の日だけ。
+data/races の番組を見て、予選の日と準優勝戦の日(=予選の最終成績)の場を取る。公式のページはグレードレースだけ(一般戦は表が空)。--semi-only は準優勝戦の日だけ。
 data/pointrank/YYYY/YYYYMMDD.json に {場コード: [{rank, regno, name, cls, rate, marks, pts, minus, note}]} を書く。
 marks は節間成績の着順(全角→半角、太字=ドリーム・特選などは [ ] で囲む)。rank・rate は「-」なら null。
 自前の得点率の計算(index.html の seriesPoints)の答え合わせと、減点(不良航法など。成績ファイルにない)を知るため。
@@ -71,6 +71,8 @@ def targets(start, end, semi_only):
             names = [r.get("name") or "" for r in v.get("races", {}).values()]
             semi = any("準優勝戦" in n for n in names)
             prelim = not any("優勝戦" in n for n in names)
+            if v.get("grade") in ("一般", "", None):  # 公式の得点率一覧はグレードレース(SG・G1・G2・G3)だけ
+                continue
             if semi or (prelim and not semi_only):
                 out.append((k, code))
     return out
