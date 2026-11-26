@@ -104,6 +104,8 @@ def main():
         time.sleep(1)
         rows = parse(h) if h else []
         n += 1
+        if not rows and n <= 3:
+            print("  解析できず", len(h or ""), (h or "")[:200].replace("\n", " "), (h or "").count("is-p10-0"), repr((h or "")[(h or "").find("is-p10-0") - 20:][:300]))
         if rows:
             cur[p][code] = rows
         print(k, code, len(rows), flush=True)
