@@ -1898,15 +1898,24 @@ function chipRow(id, opts, cur) {
 // ---------------------------------------------------------------- 節間の得点率(予選)
 // その節の初日から、準優勝戦・優勝戦がない日(=予選の日)のレースを足し上げる。今日の分は速報結果(data/live)も使う。
 // 配点は既定の表(場・節で違うことがある)。事故: F・L1・失格(S1・S2)は賞典除外、K1は0点で1走、K0・L0(責任外)は数えない
-// 過去の準優勝戦(3個・18人)の顔ぶれと照らすと、この決め方が一番よく合った(361節で約93%)
+// 減点(不良航法など)は成績ファイルにないので入っていない。最後の予選の日に番組にいない選手は途中帰郷とみなして順位から外す
+// 過去の準優勝戦(3個・18人)の顔ぶれと照らすと、この決め方が一番よく合った(2023/11〜2026/11の1,040節で約94.8%)
 const PTS_TBL = { std: [10, 8, 6, 4, 2, 1], toku: [12, 10, 8, 6, 4, 3], dream: [12, 10, 9, 7, 6, 5] };
-const PTS_NAME = { std: "予選", toku: "特選・特賞・選抜・A戦", dream: "ドリーム" };
+const PTS_NAME = { std: "予選・特賞", toku: "特選・選抜・A戦", dream: "ドリーム" };
 const PT = { seats: Number(store.get("ptSeats")) || 18 };
-function ptsKind(name) {
-  if (/ドリーム/.test(name || "")) return "dream";
-  if (/特選|特賞|選抜|特別A|A戦/.test(name || "")) return "toku";
+// レース名は途中で切れることがある(「1stドリー」「〇〇DR」「〇〇D」)。
+// 特賞はふつうの予選と同じ点(浜名湖だけ特選と同じ)。蒲郡は特選もふつうの点、大村の選抜はドリームと同じ点
+function ptsKind(name, code) {
+  const n = (name || "").replace(/\s*進入固定$/, "");
+  if (/ドリーム|ドリー$|DR$|D$/.test(n)) return "dream";
+  if (/特選/.test(n)) return code === "07" ? "std" : "toku";
+  if (/特賞/.test(n)) return code === "06" ? "toku" : "std";
+  if (/選抜|(?<!予)選$/.test(n)) return code === "24" ? "dream" : "toku";
+  if (/特別A|A戦/.test(n)) return "toku";
   return "std";
 }
+// 同率の並べ方: 1着の数 → 2着の数 → … (得点の合計より準優の顔ぶれによく合う)
+const wCmp = (aw, bw) => { for (let k = 1; k <= 6; k++) if (aw[k] !== bw[k]) return bw[k] - aw[k]; return 0; };
 const addDay = (date, k) => { const d = new Date(date + "T00:00:00Z"); d.setUTCDate(d.getUTCDate() + k); return d.toISOString().slice(0, 10); };
 const dayPath = (date) => `data/races/${date.slice(0, 4)}/${date.replace(/-/g, "")}.json`;
 // 今日・昨日・明日の分はサイトの公開を待たずリポジトリから直接読む
@@ -1968,7 +1977,7 @@ async function seriesPoints(date, code) {
     const prelim = days.filter((x) => isPrelimDay(x.v));
     const outs = await Promise.all(prelim.map((x) => Promise.all(prelimRaces(x.v).map((r) => x.future ? null : raceOutcome(x.date, code, r)))));
     prelim.forEach((x, i) => prelimRaces(x.v).forEach((r, j) => {
-      const kind = ptsKind(r.name), o = outs[i][j];
+      const kind = ptsKind(r.name, code), o = outs[i][j];
       r.entries.forEach((e) => {
         if (!e.regno) return;
         const a = racer(e);
@@ -1985,8 +1994,14 @@ async function seriesPoints(date, code) {
     }));
     const list = Object.values(R).filter((a) => a.n || a.rest.length);
     list.forEach((a) => { a.rate = a.n ? a.pts / a.n : null; });
+    // 途中帰郷: 最後の予選の日(明日の番組を含む)に1走もない選手。過去の節では、この日にいない選手が準優の日に戻ったことはない
+    const last = prelim[prelim.length - 1];
+    if (last && prelim.length > 1) {
+      const here = new Set(Object.values(last.v.races).flatMap((r) => r.entries.map((e) => e.regno)));
+      list.forEach((a) => { if (!a.excl && !here.has(a.regno)) { a.excl = true; a.home = true; a.exclWhy = "途中帰郷?"; } });
+    }
     const cmp = (a, b) => (b.excl ? 0 : 1) - (a.excl ? 0 : 1) || (b.n ? 1 : 0) - (a.n ? 1 : 0)
-      || (b.rate ?? 0) - (a.rate ?? 0) || b.pts - a.pts || b.w[1] - a.w[1] || b.w[2] - a.w[2];
+      || (b.rate ?? 0) - (a.rate ?? 0) || wCmp(a.w, b.w);
     list.sort(cmp);
     list.forEach((a, i) => { a.rank = a.excl || !a.n ? null : i + 1; });
     const restAny = list.some((a) => a.rest.length);
@@ -2039,10 +2054,13 @@ async function isPrelimFinal(date, code) {
 async function kakeConds(date, code, race) {
   try {
     if (!(await isPrelimFinal(date, code))) return {};
+    // 準優進出戦がある節は、進出戦の着順で準優が決まるので得点率の条件は使わない
+    const today = (await dayFile(date))?.venues?.[code];
+    if (/準優進出/.test(race.name || "") || Object.values(today?.races || {}).some((r) => /準優進出/.test(r.name || ""))) return {};
     const sp = await seriesPoints(date, code);
     if (!sp) return {};
     const byReg = Object.fromEntries(sp.list.map((a) => [a.regno, a]));
-    const P = PTS_TBL[ptsKind(race.name)], out = {};
+    const P = PTS_TBL[ptsKind(race.name, code)], out = {};
     race.entries.forEach((e) => {
       const a = byReg[e.regno];
       if (!a || a.excl || a.rest.length !== 1 || a.rest[0].date !== date || a.rest[0].no !== race.no) return;
@@ -2058,9 +2076,10 @@ function borderOthers(sp, a, seats) {
   return o.length >= seats ? o[seats - 1].rate : 0;
 }
 // a が次のレースで k 着なら、今の他の選手の中で何位か
-function rankIf(sp, a, addPts) {
-  const r = (a.pts + addPts) / (a.n + 1);
-  const above = sp.list.filter((x) => x !== a && !x.excl && x.n && (x.rate > r + 1e-9 || (Math.abs(x.rate - r) < 1e-9 && x.pts > a.pts + addPts))).length;
+function rankIf(sp, a, addPts, k) {
+  const r = (a.pts + addPts) / (a.n + 1), aw = a.w.slice();
+  if (k) aw[k]++;
+  const above = sp.list.filter((x) => x !== a && !x.excl && x.n && (x.rate > r + 1e-9 || (Math.abs(x.rate - r) < 1e-9 && wCmp(x.w, aw) < 0))).length;
   return { rate: r, rank: above + 1 };
 }
 const f2 = (x) => x == null ? "-" : x.toFixed(2);
@@ -2088,11 +2107,11 @@ function ptsQuickCard(sp, race) {
   });
   const head = cols.map(({ e }) => `<th class="ptsh w${e.boat}">${e.boat}<br><small>${esc(e.regno)}</small><br>${esc((e.name || "").replace(/\s+/g, "\n")).replace("\n", "<br>")}</th>`).join("");
   const row = (label, f) => `<tr><th class="ptsl">${label}</th>${cols.map(f).join("")}</tr>`;
-  const rankRow = row("順位", ({ a }) => `<td class="ptsb">${!a ? "-" : a.excl ? `<span class="ptx">除外</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ? `${a.rank}位` : "-"}</td>`);
+  const rankRow = row("順位", ({ a }) => `<td class="ptsb">${!a ? "-" : a.excl ? `<span class="ptx">${a.home ? "帰郷" : "除外"}</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ? `${a.rank}位` : "-"}</td>`);
   const rateRow = row("得点率", ({ a }) => `<td class="ptsb ${a && !a.excl && a.rank && a.rank <= S ? "ptr" : ""}">${a ? f2(a.rate) : "-"}<br><small class="sub">${a ? `${a.pts}点/${a.n}走` : ""}</small></td>`);
   const kRows = [1, 2, 3, 4, 5, 6].map((k) => row(`${k}着`, ({ a, tgt }) => {
     if (!a || !tgt || a.excl) return '<td class="sub">-</td>';
-    const x = rankIf(sp, a, PTS_TBL[tgt.kind][k - 1]);
+    const x = rankIf(sp, a, PTS_TBL[tgt.kind][k - 1], k);
     return `<td class="${x.rank <= S ? "ptin" : ""}">${f2(x.rate)}<br><small>${x.rank}位</small></td>`;
   })).join("");
   const needRow = row("必要点", ({ a, need, m }) => `<td class="ptsb">${!a || a.excl ? "-" : !m ? '<small class="sub">走了</small>' : need === "×" ? '<span class="ptx">×</span><br><small class="sub">届かない</small>' : `${need}<br><small class="sub">残${m}走</small>`}</td>`);
@@ -2141,7 +2160,7 @@ function kakeCard(race) {
       <div class="tbl"><table><thead><tr><th>条件</th><th>人数</th><th>条件の着<br>を取った</th><th>準優に<br>乗った</th></tr></thead><tbody>${allRows}</tbody></table></div>
       <h3 class="hh">枠別（上: 条件達成率% ／ 下: ふだんの予選で同じ着以内の率%）</h3>
       <div class="tbl"><table><thead><tr><th>条件</th>${[1, 2, 3, 4, 5, 6].map((b) => `<th><span class="waku w${b}">${b}</span></th>`).join("")}</tr></thead><tbody>${boatRows}</tbody></table></div>
-      <div class="note keep">予選最終日、その選手の最後の予選レースの直前に「何着以内なら18位以内か」（他の選手は今のまま）で分けて、実際の着順と準優出場を数えました。緑 = ふだんより5ポイント以上良い、赤 = 5ポイント以上悪い。各マス約500〜600人。<br>1着必須の2〜6枠はふだんの6〜7割しか勝てません（ボーダー下の、調子が悪い選手が多いため）。2・3着条件の1枠はふだんより強く、3着条件はどの枠もほぼふだん並み。得点率の計算は公式と約93%一致なので、ボーダー際は分類が少しずれることがあります。</div>
+      <div class="note keep">予選最終日、その選手の最後の予選レースの直前に「何着以内なら18位以内か」（他の選手は今のまま）で分けて、実際の着順と準優出場を数えました。緑 = ふだんより5ポイント以上良い、赤 = 5ポイント以上悪い。各マス約500〜600人。<br>1着必須の2〜6枠はふだんの6〜7割しか勝てません（ボーダー下の、調子が悪い選手が多いため）。2・3着条件の1枠はふだんより強く、3着条件はどの枠もほぼふだん並み。この表は得点率の計算を直す前（公式と約92%一致）の集計です。ボーダー際は分類が少しずれることがあります。</div>
     </div>`;
 }
 
@@ -2160,7 +2179,7 @@ async function drawPtsTab(v, race) {
     let pre = "";
     if (!lineDone && (a.excl || !a.rank || a.rank > S)) { lineDone = true; pre = `<tr class="ptline"><td colspan="6">── ${S}位ボーダー ${f2(sp.list.filter((x) => !x.excl && x.n)[S - 1]?.rate ?? null)} ──</td></tr>`; }
     const seq = a.res.map((x) => `<span class="ptq ${x.mark === "1" ? "p1" : /^[FLK失欠?]/.test(x.mark) || x.mark === "出遅" ? "ptx" : ""}">${esc(x.mark === "失格" ? "失" : x.mark === "欠場" ? "欠" : x.mark === "出遅" ? "L" : x.mark)}</span>`).join("");
-    return `${pre}<tr class="${inRace.has(a.regno) ? "ptme" : ""}"><td>${a.excl ? `<span class="ptx">除外</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ?? "-"}</td>
+    return `${pre}<tr class="${inRace.has(a.regno) ? "ptme" : ""}"><td>${a.excl ? `<span class="ptx">${a.home ? "帰郷" : "除外"}</span><br><small class="sub">${esc(a.exclWhy)}</small>` : a.rank ?? "-"}</td>
       <td class="name">${inRace.has(a.regno) ? `<span class="waku w${boatOf[a.regno]}" style="width:20px;height:20px;line-height:18px;font-size:12px">${boatOf[a.regno]}</span> ` : ""}${esc(a.name)} <small>${esc(a.cls || "")}</small></td><td class="ptsb">${f2(a.rate)}</td><td><small>${a.pts}/${a.n}</small></td>
       <td style="text-align:left">${seq}</td><td><small>${a.rest.map((x) => `${x.date !== state.date ? "明" : ""}${x.no}R`).join("・") || "-"}</small></td></tr>`;
   }).join("");
@@ -2169,13 +2188,13 @@ async function drawPtsTab(v, race) {
       <div class="meta"><span>${esc(ptsStatus(sp))}</span><span>${sp.list.length}人</span></div>
       ${ptsSeatChips("ptseat")}
       <div class="tbl"><table class="ptl"><thead><tr><th>順位</th><th>選手</th><th>得点率</th><th>点/走</th><th>今節成績</th><th>残り</th></tr></thead><tbody>${trs}</tbody></table></div>
-      <div class="note keep">色付きの行は${race.no}Rの選手（枠番つき）。同率は 得点の合計 → 1着の数 → 2着の数 の順に並べています（公式の決め方と違うことがあります）。</div>
+      <div class="note keep">色付きの行は${race.no}Rの選手（枠番つき）。同率は 1着の数 → 2着の数 → … の順に並べています（公式の決め方と違うことがあります）。最後の予選の日の番組にいない選手は途中帰郷とみなして外しています。準優進出戦がある節は、進出戦の1〜3着が準優に乗り、残りは進出戦の着順 → 得点率の順に決まります（過去65節で約94%一致）。</div>
     </div>
     ${kakeCard(race)}
     <div class="card"><h2>配点（この表の計算）</h2>
       <div class="tbl"><table><thead><tr><th>種別</th>${[1, 2, 3, 4, 5, 6].map((k) => `<th>${k}着</th>`).join("")}</tr></thead><tbody>
         ${Object.keys(PTS_TBL).map((k) => `<tr><td>${PTS_NAME[k]}</td>${PTS_TBL[k].map((p) => `<td>${p}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
-      <div class="note keep">レース名で分けています（「ドリーム」→ドリーム、「特選・特賞・選抜・特別A・A戦」→特選、それ以外→予選）。予選の日に「予選」の名前のレースがある時は「一般」で始まるレースは数えません。F・L（選手責任）・失格は賞典除外、選手責任の欠場は0点で1走、責任外の欠場・出遅れは数えません。過去361節の準優勝戦（18人）の顔ぶれと照らして約93%一致（ずれはボーダー付近の同率・僅差が中心）。配点や事故の扱いは場・節で違うことがあるので、公式の得点率と少しずれることがあります。</div>
+      <div class="note keep">レース名で分けています（「ドリーム」（「〇〇DR」「〇〇D」など名前が切れたものも）→ドリーム、「特選・選抜・特別A・A戦」→特選、「特賞」とそれ以外→予選）。場による違い: 浜名湖は特賞も特選の点、蒲郡は特選も予選の点、大村は選抜もドリームの点。予選の日に「予選」の名前のレースがある時は「一般」で始まるレースは数えません。F・L（選手責任）・失格は賞典除外、選手責任の欠場は0点で1走、責任外の欠場・出遅れは数えません。不良航法などの減点は成績ファイルにないので入っていません（グレードレースは公式の得点率一覧で確認できます）。過去1,040節（2023/11〜2026/11）の準優勝戦（18人）の顔ぶれと照らして約95%一致。ずれの残りは主に減点と、準優の日の帰郷・同率です。</div>
     </div>`;
   $("ptseat").querySelectorAll("button").forEach((b) => b.onclick = () => { PT.seats = Number(b.dataset.p); store.set("ptSeats", b.dataset.p); drawPtsTab(v, race); });
 }
