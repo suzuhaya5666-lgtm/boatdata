@@ -131,6 +131,7 @@
   td.ptin { background: #e8777a; color: #fff; font-weight: 700; } td.ptin small { color: #fff; }
   .ptx { color: #c92a2a; font-weight: 700; } .ptnx { display: inline-block; border: 2px solid #1971c2; border-radius: 4px; padding: 0 4px; font-weight: 800; }
   .ptnx.cur { background: #e03131; border-color: #e03131; color: #fff; }
+  td.kkup { background: #d3f9d8; } td.kkdn { background: #ffe3e3; }
   tr.ptme td { background: #fff4e6; } tr.ptline td { color: #e03131; font-weight: 800; font-size: 12px; background: #fff5f5; }
   .ptq { display: inline-block; min-width: 1.2em; text-align: center; font-size: 13px; }
   .ptsbtn { margin: 0 0 12px; width: 100%; border: 1.5px solid var(--accent); color: var(--accent); border-radius: 999px; padding: 9px; font-weight: 700; background: #fff; }
@@ -2057,6 +2058,36 @@ async function fillPtsQuick(v, race) {
   $("ptseat").querySelectorAll("button").forEach((b) => b.onclick = () => { PT.seats = Number(b.dataset.p); store.set("ptSeats", b.dataset.p); fillPtsQuick(v, race); });
 }
 
+// 勝負駆けの検証(scripts なし・2023/11〜2026/11 の準優がある1,029節を集計した固定値)
+// 予選最終日、その選手の最後の予選レースの直前に「何着以内なら18位以内か」(他の選手は今のまま)で分けた。[人数, 条件の着を取った, 準優に乗った]
+const KAKE = {
+  all: { 1: [3427, 468, 627], 2: [3559, 1135, 1156], 3: [3343, 1707, 1609], 4: [3360, 2364, 2238] },
+  boat: {
+    1: [[592, 304, 278], [601, 53, 93], [585, 48, 79], [504, 33, 72], [591, 21, 62], [554, 9, 43]],
+    2: [[598, 461, 383], [627, 227, 213], [580, 171, 186], [594, 134, 164], [607, 93, 123], [553, 49, 87]],
+    3: [[552, 475, 416], [519, 297, 260], [602, 321, 289], [588, 277, 282], [529, 179, 195], [553, 158, 167]],
+    4: [[467, 433, 414], [546, 425, 392], [591, 459, 430], [600, 399, 389], [537, 339, 302], [619, 309, 311]],
+  },
+  // ふだんの予選で、その枠が k着以内に入る率(%)
+  base: { 1: [51, 15, 13, 10, 6, 3], 2: [69, 39, 35, 26, 18, 12], 3: [79, 57, 54, 45, 36, 27], 4: [86, 73, 71, 64, 56, 47] },
+};
+const KAKE_NAME = { 1: "1着必須", 2: "2着以内", 3: "3着以内", 4: "4着以内" };
+function kakeCard(race) {
+  const pc = (a, n) => Math.round(a / n * 100);
+  const boats = new Set(race ? race.entries.map((e) => e.boat) : []);
+  const allRows = [1, 2, 3, 4].map((k) => { const [n, a, m] = KAKE.all[k]; return `<tr><td style="text-align:left">${KAKE_NAME[k]}</td><td>${n.toLocaleString()}</td><td class="ptsb">${pc(a, n)}%</td><td>${pc(m, n)}%</td></tr>`; }).join("");
+  const boatRows = [1, 2, 3, 4].map((k) => `<tr><td style="text-align:left">${KAKE_NAME[k]}</td>${KAKE.boat[k].map(([n, a], i) => {
+    const r = pc(a, n), b = KAKE.base[k][i];
+    return `<td class="${r - b >= 5 ? "kkup" : r - b <= -5 ? "kkdn" : ""}"><b>${r}</b><br><small class="sub">${b}</small></td>`; }).join("")}</tr>`).join("");
+  return `<div class="card"><h2>勝負駆けの検証（予選最終日）</h2>
+      <div class="meta"><span>2023/11〜2026/11・準優がある1,029節</span></div>
+      <div class="tbl"><table><thead><tr><th>条件</th><th>人数</th><th>条件の着<br>を取った</th><th>準優に<br>乗った</th></tr></thead><tbody>${allRows}</tbody></table></div>
+      <h3 class="hh">枠別（上: 条件達成率% ／ 下: ふだんの予選で同じ着以内の率%）</h3>
+      <div class="tbl"><table><thead><tr><th>条件</th>${[1, 2, 3, 4, 5, 6].map((b) => `<th><span class="waku w${b}">${b}</span></th>`).join("")}</tr></thead><tbody>${boatRows}</tbody></table></div>
+      <div class="note keep">予選最終日、その選手の最後の予選レースの直前に「何着以内なら18位以内か」（他の選手は今のまま）で分けて、実際の着順と準優出場を数えました。緑 = ふだんより5ポイント以上良い、赤 = 5ポイント以上悪い。各マス約500〜600人。<br>1着必須の2〜6枠はふだんの6〜7割しか勝てません（ボーダー下の、調子が悪い選手が多いため）。2・3着条件の1枠はふだんより強く、3着条件はどの枠もほぼふだん並み。得点率の計算は公式と約93%一致なので、ボーダー際は分類が少しずれることがあります。</div>
+    </div>`;
+}
+
 // 「得点」タブ: 節間の得点率ランキング(全選手)
 async function drawPtsTab(v, race) {
   loading();
@@ -2083,6 +2114,7 @@ async function drawPtsTab(v, race) {
       <div class="tbl"><table class="ptl"><thead><tr><th>順位</th><th>選手</th><th>得点率</th><th>点/走</th><th>今節成績</th><th>残り</th></tr></thead><tbody>${trs}</tbody></table></div>
       <div class="note keep">色付きの行は${race.no}Rの選手（枠番つき）。同率は 得点の合計 → 1着の数 → 2着の数 の順に並べています（公式の決め方と違うことがあります）。</div>
     </div>
+    ${kakeCard(race)}
     <div class="card"><h2>配点（この表の計算）</h2>
       <div class="tbl"><table><thead><tr><th>種別</th>${[1, 2, 3, 4, 5, 6].map((k) => `<th>${k}着</th>`).join("")}</tr></thead><tbody>
         ${Object.keys(PTS_TBL).map((k) => `<tr><td>${PTS_NAME[k]}</td>${PTS_TBL[k].map((p) => `<td>${p}</td>`).join("")}</tr>`).join("")}</tbody></table></div>
