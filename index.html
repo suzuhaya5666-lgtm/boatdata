@@ -2015,10 +2015,12 @@ async function seriesPoints(date, code) {
 // 2023/11〜2025/10 で倍率を決め、2025/10〜2026/11(決めるのに使っていない期間)でも当たりやすくなるのを確かめた(得点率の計算を直したあとで決め直し)
 //   1コースで2着以内・3着以内が必要: 1着の目 ×1.2(逃げが予想より約4pt多い)
 //   2コースで2着以内・3着以内が必要: 2着の目 ×1.2(2着が予想より約4pt多い。1着はほぼ予想どおり)
-const KAKE_ADJ = [{ c: 1, cats: [2, 3], a: 1.2, b: 1.0, label: "1コース2・3着以内条件（1着↑）" }, { c: 2, cats: [2, 3], a: 1.0, b: 1.2, label: "2コース2・3着以内条件（2着↑）" }];
+//   SG・G1で1着でも準優に届かない3・4コース: 1着・2着の目 ×0.7(連対が予想より7〜8pt少ない。65節・約400人。2026/11に試しに入れた。データが溜まったら見直す)
+const KAKE_ADJ = [{ c: 1, cats: [2, 3], a: 1.2, b: 1.0, label: "1コース2・3着以内条件（1着↑）" }, { c: 2, cats: [2, 3], a: 1.0, b: 1.2, label: "2コース2・3着以内条件（2着↑）" }, { c: 3, cats: [0], grades: ["SG", "G1"], a: 0.7, b: 0.7, label: "SG・G1 3コース準優絶望（1・2着↓）" }, { c: 4, cats: [0], grades: ["SG", "G1"], a: 0.7, b: 0.7, label: "SG・G1 4コース準優絶望（1・2着↓）" }];
+const kakeRules = (conds) => KAKE_ADJ.filter((r) => r.cats.includes(conds?.[r.c]) && (!r.grades || r.grades.includes(conds?.g)));
 // conds: {コース: 条件(何着以内)}。tri: [{c: [1着, 2着, 3着のコース], p}]
 function kakeTri(tri, conds) {
-  const rules = KAKE_ADJ.filter((r) => r.cats.includes(conds?.[r.c]));
+  const rules = kakeRules(conds);
   if (!rules.length) return tri;
   const out = tri.map((t) => {
     let p = t.p;
@@ -2029,11 +2031,11 @@ function kakeTri(tri, conds) {
   out.forEach((o) => { o.p /= s; });
   return out.sort((x, y) => y.p - x.p);
 }
-const kakeLabels = (conds) => KAKE_ADJ.filter((r) => r.cats.includes(conds?.[r.c])).map((r) => r.label);
+const kakeLabels = (conds) => kakeRules(conds).map((r) => r.label);
 // 艇番ごとの条件 → コースごと
 function kakeByCourse(byBoat, order) {
   const out = {};
-  for (const [b, k] of Object.entries(byBoat || {})) { const c = order.indexOf(Number(b)); if (c > 0) out[c] = k; }
+  for (const [b, k] of Object.entries(byBoat || {})) { if (b === "g") { out.g = k; continue; } const c = order.indexOf(Number(b)); if (c > 0) out[c] = k; }
   return out;
 }
 // 予選最終日か: 翌日の番組に準優勝戦がある / 番組がまだなら月間日程で「4日以上の節の最終日の2日前」(過去の準優の前日と99%一致)
@@ -2050,7 +2052,7 @@ async function isPrelimFinal(date, code) {
   while (g[addDay(e, 1)]?.title === t) e = addDay(e, 1);
   return (Date.parse(e) - Date.parse(s)) / 864e5 + 1 >= 4 && date === addDay(e, -2);
 }
-// このレースが「その選手の今節最後の予選レース」で、まだ走っていない選手の条件 {艇番: 何着以内}。0着(届かない)は入れない
+// このレースが「その選手の今節最後の予選レース」で、まだ走っていない選手の条件 {艇番: 何着以内}。0 = 1着でも届かない。g = グレード
 async function kakeConds(date, code, race) {
   try {
     if (!(await isPrelimFinal(date, code))) return {};
@@ -2065,8 +2067,10 @@ async function kakeConds(date, code, race) {
       const a = byReg[e.regno];
       if (!a || a.excl || a.rest.length !== 1 || a.rest[0].date !== date || a.rest[0].no !== race.no) return;
       const b = borderOthers(sp, a, 18);
+      out[e.boat] = 0;
       for (let k = 6; k >= 1; k--) if ((a.pts + P[k - 1]) / (a.n + 1) >= b - 1e-9) { out[e.boat] = k; break; }
     });
+    if (Object.keys(out).length) out.g = today?.grade || "";
     return out;
   } catch (e) { return {}; }
 }

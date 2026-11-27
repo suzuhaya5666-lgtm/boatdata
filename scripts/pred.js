@@ -24,7 +24,7 @@ function pick(name) {
 const NAMES = ["ZERO", "CLS_NUM", "demeQ", "demeAdjust", "featGroups", "defaultMask", "raceKind", "biasFor", "demeTri", "ARE", "WIND", "areWind", "areOf",
   // 勝負駆けの補正(節間の得点率から条件を出す)
   "PTS_TBL", "ptsKind", "wCmp", "addDay", "dayPath", "isPrelimDay", "prelimRaces", "raceOutcome", "seriesPoints", "borderOthers", "statusText",
-  "KAKE_ADJ", "kakeTri", "kakeLabels", "kakeByCourse", "isPrelimFinal", "kakeConds"];
+  "KAKE_ADJ", "kakeRules", "kakeTri", "kakeLabels", "kakeByCourse", "isPrelimFinal", "kakeConds"];
 const src = NAMES.map(pick).join("\n");
 var state = {};
 eval(src.replace(/^const /gm, "var "));
